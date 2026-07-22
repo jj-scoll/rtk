@@ -1,0 +1,26 @@
+[filters.tox]
+description = "Compact tox output — strip dependency-install and hook setup lines"
+match_command = "^tox\\b"
+strip_ansi = true
+strip_lines_matching = [
+  "^\\s*$",
+  "install_deps>",
+  "^\\.pkg:",
+]
+max_lines = 50
+
+[[tests.tox]]
+name = "strips install_deps and pkg hooks, keeps commands and result"
+input = """
+py311: install_deps> pip install -r requirements.txt
+.pkg: _optional_hooks> python /path/pep517
+py311: commands[0]> pytest -q
+py311: OK (12.34 seconds)
+  congratulations :) (12.50 seconds)
+"""
+expected = "py311: commands[0]> pytest -q\npy311: OK (12.34 seconds)\n  congratulations :) (12.50 seconds)"
+
+[[tests.tox]]
+name = "failure line passes through"
+input = "py311: FAIL code 1 (13.00 seconds)"
+expected = "py311: FAIL code 1 (13.00 seconds)"

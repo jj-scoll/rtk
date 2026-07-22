@@ -1,0 +1,29 @@
+[filters.gem]
+description = "Compact RubyGems output — strip fetch/documentation noise, keep results"
+match_command = "^gem\\b"
+strip_ansi = true
+strip_lines_matching = [
+  "^\\s*$",
+  "^Fetching:",
+  "^Parsing documentation",
+  "^Installing ri documentation",
+  "^Installing rdoc documentation",
+  "^Done installing documentation",
+]
+max_lines = 40
+
+[[tests.gem]]
+name = "strips fetch and documentation noise, keeps result"
+input = """
+Fetching: rake-13.0.6.gem
+Successfully installed rake-13.0.6
+Parsing documentation for rake-13.0.6
+Done installing documentation for rake after 1 seconds
+1 gem installed
+"""
+expected = "Successfully installed rake-13.0.6\n1 gem installed"
+
+[[tests.gem]]
+name = "error line passes through"
+input = "ERROR:  Could not find a valid gem 'foo' (>= 0)"
+expected = "ERROR:  Could not find a valid gem 'foo' (>= 0)"

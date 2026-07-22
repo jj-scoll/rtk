@@ -1,0 +1,25 @@
+[filters.deno]
+description = "Compact deno output — strip download/check progress lines"
+match_command = "^deno\\b"
+strip_ansi = true
+strip_lines_matching = [
+  "^\\s*$",
+  "^Download ",
+  "^Check ",
+]
+max_lines = 40
+
+[[tests.deno]]
+name = "strips download and check noise, keeps program output"
+input = """
+Download https://deno.land/std/http/mod.ts
+Check file:///app/main.ts
+
+Hello World
+"""
+expected = "Hello World"
+
+[[tests.deno]]
+name = "error line passes through"
+input = "error: Uncaught TypeError: x is not a function"
+expected = "error: Uncaught TypeError: x is not a function"

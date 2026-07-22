@@ -1,0 +1,28 @@
+[filters.conda]
+description = "Compact conda output — strip metadata/solver/transaction progress lines"
+match_command = "^conda\\b"
+strip_ansi = true
+strip_lines_matching = [
+  "^\\s*$",
+  "^Collecting package metadata",
+  "^Solving environment",
+  "^Preparing transaction",
+  "^Verifying transaction",
+  "^Executing transaction",
+]
+max_lines = 50
+
+[[tests.conda]]
+name = "strips solver and transaction noise, keeps result"
+input = """
+Collecting package metadata (current_repodata.json): done
+Solving environment: done
+
+# All requested packages already installed.
+"""
+expected = "# All requested packages already installed."
+
+[[tests.conda]]
+name = "error line passes through"
+input = "PackagesNotFoundError: The following packages are not available from current channels:"
+expected = "PackagesNotFoundError: The following packages are not available from current channels:"

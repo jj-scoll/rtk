@@ -1,0 +1,22 @@
+[filters.az]
+description = "Compact Azure CLI output — strip blank lines, cap width and length"
+match_command = "^az\\b"
+strip_ansi = true
+strip_lines_matching = ["^\\s*$"]
+truncate_lines_at = 120
+max_lines = 40
+
+[[tests.az]]
+name = "strips blank lines, preserves table output"
+input = """
+Name    ResourceGroup    Location
+------  ---------------  ----------
+myVM    rg1              eastus
+
+"""
+expected = "Name    ResourceGroup    Location\n------  ---------------  ----------\nmyVM    rg1              eastus"
+
+[[tests.az]]
+name = "empty json array passes through"
+input = "[]"
+expected = "[]"

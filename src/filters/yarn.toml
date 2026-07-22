@@ -1,0 +1,29 @@
+[filters.yarn]
+description = "Compact yarn output — strip progress steps and info/verbose noise"
+match_command = "^yarn\\b"
+strip_ansi = true
+strip_lines_matching = [
+  "^\\[\\d+/\\d+\\]",
+  "^info\\b",
+  "^verbose\\b",
+  "^\\s*$",
+]
+max_lines = 40
+
+[[tests.yarn]]
+name = "strips progress steps, keeps result lines"
+input = """
+yarn install v1.22.19
+[1/4] Resolving packages...
+[2/4] Fetching packages...
+[3/4] Linking dependencies...
+[4/4] Building fresh packages...
+success Saved lockfile.
+Done in 12.34s.
+"""
+expected = "yarn install v1.22.19\nsuccess Saved lockfile.\nDone in 12.34s."
+
+[[tests.yarn]]
+name = "error line passes through"
+input = "error Couldn't find package \"foo\" on the \"npm\" registry."
+expected = "error Couldn't find package \"foo\" on the \"npm\" registry."
