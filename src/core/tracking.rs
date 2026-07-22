@@ -679,11 +679,11 @@ impl Tracker {
     ) -> Result<Vec<(String, usize)>> {
         let (project_exact, project_glob) = project_filter_params(project_path); // added
         let mut stmt = self.conn.prepare(
-            "SELECT DATE(timestamp), SUM(saved_tokens)
+            "SELECT DATE(timestamp, 'localtime'), SUM(saved_tokens)
              FROM commands
              WHERE (?1 IS NULL OR project_path = ?1 OR project_path GLOB ?2)
-             GROUP BY DATE(timestamp)
-             ORDER BY DATE(timestamp) DESC
+             GROUP BY DATE(timestamp, 'localtime')
+             ORDER BY DATE(timestamp, 'localtime') DESC
              LIMIT 30", // added: project filter in WHERE
         )?;
 
@@ -724,7 +724,7 @@ impl Tracker {
         let (project_exact, project_glob) = project_filter_params(project_path); // added
         let mut stmt = self.conn.prepare(
             "SELECT
-                DATE(timestamp) as date,
+                DATE(timestamp, 'localtime') as date,
                 COUNT(*) as commands,
                 SUM(input_tokens) as input,
                 SUM(output_tokens) as output,
@@ -732,8 +732,8 @@ impl Tracker {
                 SUM(exec_time_ms) as total_time
              FROM commands
              WHERE (?1 IS NULL OR project_path = ?1 OR project_path GLOB ?2)
-             GROUP BY DATE(timestamp)
-             ORDER BY DATE(timestamp) DESC", // added: project filter
+             GROUP BY DATE(timestamp, 'localtime')
+             ORDER BY DATE(timestamp, 'localtime') DESC", // added: project filter
         )?;
 
         let rows = stmt.query_map(params![project_exact, project_glob], |row| {
@@ -797,8 +797,8 @@ impl Tracker {
         let (project_exact, project_glob) = project_filter_params(project_path); // added
         let mut stmt = self.conn.prepare(
             "SELECT
-                DATE(timestamp, 'weekday 0', '-6 days') as week_start,
-                DATE(timestamp, 'weekday 0') as week_end,
+                DATE(timestamp, 'localtime', 'weekday 0', '-6 days') as week_start,
+                DATE(timestamp, 'localtime', 'weekday 0') as week_end,
                 COUNT(*) as commands,
                 SUM(input_tokens) as input,
                 SUM(output_tokens) as output,
@@ -872,7 +872,7 @@ impl Tracker {
         let (project_exact, project_glob) = project_filter_params(project_path); // added
         let mut stmt = self.conn.prepare(
             "SELECT
-                strftime('%Y-%m', timestamp) as month,
+                strftime('%Y-%m', timestamp, 'localtime') as month,
                 COUNT(*) as commands,
                 SUM(input_tokens) as input,
                 SUM(output_tokens) as output,
@@ -1736,6 +1736,60 @@ mod tests {
         );
     }
 
+    // ── Local-date bucketing (timezone alignment with ccusage) ──
+    //
+    // Timestamps are stored in UTC, but daily/weekly/monthly buckets must use
+    // the LOCAL date so they align with ccusage (which groups by local day)
+    // and with user intuition. Expected values are computed via chrono::Local
+    // so these tests are deterministic in any timezone: on UTC machines the
+    // expectation matches UTC bucketing too; in any non-UTC zone they verify
+    // the actual conversion.
+
+    /// Insert a raw command row with an explicit UTC timestamp.
+    fn insert_at(tracker: &Tracker, utc_ts: &str) {
+        tracker
+            .conn
+            .execute(
+                "INSERT INTO commands (timestamp, original_cmd, rtk_cmd, project_path, input_tokens, output_tokens, saved_tokens, savings_pct, exec_time_ms)
+                 VALUES (?1, 'git status', 'rtk git status', '/tmp/tz_test', 100, 20, 80, 80.0, 5)",
+                params![utc_ts],
+            )
+            .expect("Failed to insert test row");
+    }
+
+    /// Local date (YYYY-MM-DD) for a UTC RFC3339 instant, via chrono.
+    fn local_date_of(utc_ts: &str) -> chrono::NaiveDate {
+        DateTime::parse_from_rfc3339(utc_ts)
+            .expect("valid rfc3339")
+            .with_timezone(&chrono::Local)
+            .date_naive()
+    }
+
+    #[test]
+    fn test_daily_stats_bucket_by_local_date() {
+        let tracker = Tracker::new_in_memory().expect("Failed to create in-memory tracker");
+        // 00:30 UTC: belongs to the *previous* local day in any UTC-negative zone.
+        let utc_ts = "2026-06-03T00:30:00+00:00";
+        insert_at(&tracker, utc_ts);
+
+        let expected = local_date_of(utc_ts).to_string();
+
+        let days = tracker.get_all_days().expect("Failed to get daily stats");
+        assert_eq!(days.len(), 1);
+        assert_eq!(
+            days[0].date, expected,
+            "daily bucket must use the local date, not the UTC date"
+        );
+
+        // The 30-day activity series must agree with the daily stats.
+        let summary = tracker.get_summary().expect("Failed to get summary");
+        assert_eq!(
+            summary.by_day,
+            vec![(expected, 80)],
+            "activity series must bucket by local date"
+        );
+    }
+
     #[test]
     #[cfg(unix)]
     fn test_restrict_db_files_covers_wal_sidecars() {
@@ -1756,5 +1810,45 @@ mod tests {
             let mode = std::fs::metadata(p).expect("metadata").permissions().mode() & 0o777;
             assert_eq!(mode, 0o600, "expected 0600 on {}", p.display());
         }
+    }
+
+    #[test]
+    fn test_monthly_stats_bucket_by_local_month() {
+        let tracker = Tracker::new_in_memory().expect("Failed to create in-memory tracker");
+        // 00:30 UTC on the 1st: previous local month in any UTC-negative zone.
+        let utc_ts = "2026-07-01T00:30:00+00:00";
+        insert_at(&tracker, utc_ts);
+
+        let expected = local_date_of(utc_ts).format("%Y-%m").to_string();
+
+        let months = tracker.get_by_month().expect("Failed to get monthly stats");
+        assert_eq!(months.len(), 1);
+        assert_eq!(
+            months[0].month, expected,
+            "monthly bucket must use the local month, not the UTC month"
+        );
+    }
+
+    #[test]
+    fn test_weekly_stats_bucket_by_local_week() {
+        use chrono::Datelike;
+
+        let tracker = Tracker::new_in_memory().expect("Failed to create in-memory tracker");
+        // Monday 2026-06-01 00:30 UTC: still Sunday (previous week) in any
+        // UTC-negative zone.
+        let utc_ts = "2026-06-01T00:30:00+00:00";
+        insert_at(&tracker, utc_ts);
+
+        let local = local_date_of(utc_ts);
+        let expected_week_start =
+            local - chrono::Duration::days(local.weekday().num_days_from_monday() as i64);
+
+        let weeks = tracker.get_by_week().expect("Failed to get weekly stats");
+        assert_eq!(weeks.len(), 1);
+        assert_eq!(
+            weeks[0].week_start,
+            expected_week_start.to_string(),
+            "weekly bucket must start from the local-date Monday"
+        );
     }
 }
