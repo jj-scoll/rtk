@@ -481,14 +481,6 @@ pub const RULES: &[RtkRule] = &[
         ..RtkRule::DEFAULT
     },
     RtkRule {
-        pattern: r"^uv\s+run(?:\s|$)",
-        rtk_cmd: "rtk uv",
-        rewrite_prefixes: &["uv"],
-        category: "Python",
-        savings_pct: 70.0,
-        ..RtkRule::DEFAULT
-    },
-    RtkRule {
         pattern: r"^go\s+(test|build|vet)",
         rtk_cmd: "rtk go",
         rewrite_prefixes: &["go"],
@@ -890,7 +882,7 @@ pub const RULES: &[RtkRule] = &[
         ..RtkRule::DEFAULT
     },
     RtkRule {
-        pattern: r"^terraform\s+plan",
+        pattern: r"^terraform\s+(plan|apply|destroy|fmt|validate|init|output|refresh)",
         rtk_cmd: "rtk terraform",
         rewrite_prefixes: &["terraform"],
         category: "Infra",
@@ -950,6 +942,166 @@ pub const RULES: &[RtkRule] = &[
         rewrite_prefixes: &["liquibase"],
         category: "Infra",
         savings_pct: 65.0,
+        ..RtkRule::DEFAULT
+    },
+    RtkRule {
+        pattern: r"^yarn\s+(add|install|remove|run|up|upgrade|list|why|outdated|build|test)(\s|$)",
+        rtk_cmd: "rtk yarn",
+        rewrite_prefixes: &["yarn"],
+        category: "PackageManager",
+        savings_pct: 70.0,
+        subcmd_savings: &[],
+        subcmd_status: &[],
+        ..RtkRule::DEFAULT
+    },
+    RtkRule {
+        pattern: r"^journalctl\b",
+        rtk_cmd: "rtk journalctl",
+        rewrite_prefixes: &["journalctl"],
+        category: "System",
+        savings_pct: 70.0,
+        subcmd_savings: &[],
+        subcmd_status: &[],
+        ..RtkRule::DEFAULT
+    },
+    RtkRule {
+        pattern: r"^az\s+\S",
+        rtk_cmd: "rtk az",
+        rewrite_prefixes: &["az"],
+        category: "Cloud",
+        savings_pct: 65.0,
+        subcmd_savings: &[],
+        subcmd_status: &[],
+        ..RtkRule::DEFAULT
+    },
+    RtkRule {
+        pattern: r"^terragrunt\s+(plan|apply|init|validate|output|run-all)(\s|$)",
+        rtk_cmd: "rtk terragrunt",
+        rewrite_prefixes: &["terragrunt"],
+        category: "Infra",
+        savings_pct: 70.0,
+        subcmd_savings: &[],
+        subcmd_status: &[],
+        ..RtkRule::DEFAULT
+    },
+    RtkRule {
+        pattern: r"^bun\s+(install|add|remove|run|build|test|update|outdated|x)(\s|$)",
+        rtk_cmd: "rtk bun",
+        rewrite_prefixes: &["bun"],
+        category: "PackageManager",
+        savings_pct: 65.0,
+        subcmd_savings: &[],
+        subcmd_status: &[],
+        ..RtkRule::DEFAULT
+    },
+    RtkRule {
+        pattern: r"^deno\s+(run|test|task|install|cache|check|bundle)(\s|$)",
+        rtk_cmd: "rtk deno",
+        rewrite_prefixes: &["deno"],
+        category: "JavaScript",
+        savings_pct: 65.0,
+        subcmd_savings: &[],
+        subcmd_status: &[],
+        ..RtkRule::DEFAULT
+    },
+    RtkRule {
+        pattern: r"^turbo\s+(run|build|test|lint)(\s|$)",
+        rtk_cmd: "rtk turbo",
+        rewrite_prefixes: &["turbo"],
+        category: "JavaScript",
+        savings_pct: 70.0,
+        subcmd_savings: &[],
+        subcmd_status: &[],
+        ..RtkRule::DEFAULT
+    },
+    RtkRule {
+        pattern: r"^(pnpm\s+)?nx\s+(run|build|test|lint|affected|run-many)(\s|$)",
+        rtk_cmd: "rtk nx",
+        rewrite_prefixes: &["nx"],
+        category: "JavaScript",
+        savings_pct: 70.0,
+        subcmd_savings: &[],
+        subcmd_status: &[],
+        ..RtkRule::DEFAULT
+    },
+    RtkRule {
+        pattern: r"^gem\s+(install|update|uninstall|list|build|push)(\s|$)",
+        rtk_cmd: "rtk gem",
+        rewrite_prefixes: &["gem"],
+        category: "PackageManager",
+        savings_pct: 70.0,
+        subcmd_savings: &[],
+        subcmd_status: &[],
+        ..RtkRule::DEFAULT
+    },
+    RtkRule {
+        pattern: r"^conda\s+(install|create|update|remove|env|list)(\s|$)",
+        rtk_cmd: "rtk conda",
+        rewrite_prefixes: &["conda"],
+        category: "PackageManager",
+        savings_pct: 70.0,
+        subcmd_savings: &[],
+        subcmd_status: &[],
+        ..RtkRule::DEFAULT
+    },
+    RtkRule {
+        pattern: r"^bazel\s+(build|test|run|query)(\s|$)",
+        rtk_cmd: "rtk bazel",
+        rewrite_prefixes: &["bazel"],
+        category: "Build",
+        savings_pct: 75.0,
+        subcmd_savings: &[],
+        subcmd_status: &[],
+        ..RtkRule::DEFAULT
+    },
+    RtkRule {
+        pattern: r"^semgrep\s+(scan|ci|--config)(\s|$)",
+        rtk_cmd: "rtk semgrep",
+        rewrite_prefixes: &["semgrep"],
+        category: "Security",
+        savings_pct: 70.0,
+        subcmd_savings: &[],
+        subcmd_status: &[],
+        ..RtkRule::DEFAULT
+    },
+    RtkRule {
+        pattern: r"^trivy\s+(image|fs|repo|config|k8s)(\s|$)",
+        rtk_cmd: "rtk trivy",
+        rewrite_prefixes: &["trivy"],
+        category: "Security",
+        savings_pct: 70.0,
+        subcmd_savings: &[],
+        subcmd_status: &[],
+        ..RtkRule::DEFAULT
+    },
+    RtkRule {
+        pattern: r"^tox\b",
+        rtk_cmd: "rtk tox",
+        rewrite_prefixes: &["tox"],
+        category: "Python",
+        savings_pct: 70.0,
+        subcmd_savings: &[],
+        subcmd_status: &[],
+        ..RtkRule::DEFAULT
+    },
+    RtkRule {
+        pattern: r"^podman\s+(ps|images|build|run|inspect|logs)(\s|$)",
+        rtk_cmd: "rtk podman",
+        rewrite_prefixes: &["podman"],
+        category: "Container",
+        savings_pct: 60.0,
+        subcmd_savings: &[],
+        subcmd_status: &[],
+        ..RtkRule::DEFAULT
+    },
+    RtkRule {
+        pattern: r"^jq\b",
+        rtk_cmd: "rtk jq",
+        rewrite_prefixes: &["jq"],
+        category: "Utility",
+        savings_pct: 50.0,
+        subcmd_savings: &[],
+        subcmd_status: &[],
         ..RtkRule::DEFAULT
     },
 ];

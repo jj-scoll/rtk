@@ -189,6 +189,9 @@ mod tests {
 
         #[test]
         fn test_fd_dup_redirect_still_rewrites() {
+            // Verdict pinned to Default (not read from the real machine's
+            // settings.json) so this doesn't depend on whether `git *` happens
+            // to be allow-listed locally.
             assert!(matches!(
                 evaluate_with_verdict("git status 2>&1", PermissionVerdict::Default, &[], &[]),
                 RewriteOutcome::Ask(_)
