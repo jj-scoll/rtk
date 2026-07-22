@@ -11,8 +11,8 @@ use std::collections::HashMap;
 
 use provider::{ClaudeProvider, SessionProvider};
 use registry::{
-    category_avg_tokens, classify_command, split_command_chain, strip_disabled_prefix,
-    Classification,
+    category_avg_tokens, classify_command, is_auto_rewritten, split_command_chain,
+    strip_disabled_prefix, Classification,
 };
 use report::{DiscoverReport, SupportedEntry, UnsupportedEntry};
 
@@ -74,6 +74,7 @@ pub fn run(
 
     let mut total_commands: usize = 0;
     let mut already_rtk: usize = 0;
+    let mut auto_handled: usize = 0;
     let mut parse_errors: usize = 0;
     let mut rtk_disabled_count: usize = 0;
     let mut rtk_disabled_cmds: HashMap<String, usize> = HashMap::new();
@@ -121,6 +122,15 @@ pub fn run(
                         estimated_savings_pct,
                         status,
                     } => {
+                        // The hook rewrites this command at execution time, but the
+                        // transcript records the pre-rewrite form. If it would actually
+                        // be rewritten, the savings are already captured (visible in
+                        // `rtk gain`) — count it as auto-handled, not a missed chance.
+                        if is_auto_rewritten(part) {
+                            auto_handled += 1;
+                            continue;
+                        }
+
                         let bucket = supported_map.entry(rtk_equivalent).or_insert_with(|| {
                             SupportedBucket {
                                 rtk_equivalent,
@@ -257,6 +267,7 @@ pub fn run(
         sessions_scanned: sessions.len(),
         total_commands,
         already_rtk,
+        auto_handled,
         since_days,
         supported,
         unsupported,
