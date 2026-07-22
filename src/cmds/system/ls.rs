@@ -2,7 +2,7 @@
 
 use super::constants::NOISE_DIRS;
 use crate::core::runner::{self, RunOptions};
-use crate::core::truncate::{reduced, CAP_WARNINGS};
+use crate::core::truncate::{reduced, CAP_DIR_ENTRIES, CAP_WARNINGS};
 use crate::core::utils::resolved_command;
 use anyhow::Result;
 use regex::Regex;
@@ -303,18 +303,30 @@ fn compact_ls(raw: &str, show_all: bool, show_long: bool) -> (String, String, us
 
     let mut entries = String::new();
 
+    // Cap the listing so pathological directories (`ls /nix/store`) can't flood
+    // the context. The summary below still reports the full counts.
+    let total_entries = dirs.len() + files.len();
+    let mut emitted: usize = 0;
+
     // Dirs first, compact
     for (name, octal) in &dirs {
+        if emitted >= CAP_DIR_ENTRIES {
+            break;
+        }
         if let Some(octal) = octal {
             entries.push_str(octal);
             entries.push_str("  ");
         }
         entries.push_str(name);
         entries.push_str("/\n");
+        emitted += 1;
     }
 
     // Files with size
     for (name, size, octal) in &files {
+        if emitted >= CAP_DIR_ENTRIES {
+            break;
+        }
         if let Some(octal) = octal {
             entries.push_str(octal);
             entries.push_str("  ");
@@ -323,6 +335,14 @@ fn compact_ls(raw: &str, show_all: bool, show_long: bool) -> (String, String, us
         entries.push_str("  ");
         entries.push_str(size);
         entries.push('\n');
+        emitted += 1;
+    }
+
+    if total_entries > CAP_DIR_ENTRIES {
+        entries.push_str(&format!(
+            "... (+{} more entries)\n",
+            total_entries - CAP_DIR_ENTRIES
+        ));
     }
 
     // Summary line (separate so caller can suppress when piped)
@@ -352,6 +372,46 @@ fn compact_ls(raw: &str, show_all: bool, show_long: bool) -> (String, String, us
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_compact_caps_huge_listings() {
+        // A pathological directory (e.g. `ls /nix/store` with tens of thousands of
+        // entries) must be capped, not emitted wholesale into the LLM context.
+        let mut input = String::from("total 8000\n");
+        for i in 0..1000 {
+            input.push_str(&format!(
+                "-rw-r--r--  1 user  staff  1234 Jan  1 12:00 file{:04}.txt\n",
+                i
+            ));
+        }
+        let (entries, summary, _parsed) = compact_ls(&input, false, false);
+        let entry_lines = entries.lines().count();
+        assert!(
+            entry_lines <= CAP_DIR_ENTRIES + 1, // capped entries + truncation marker
+            "expected listing capped at {} entries, got {} lines",
+            CAP_DIR_ENTRIES,
+            entry_lines
+        );
+        assert!(
+            entries.contains("more entries"),
+            "expected truncation marker in entries:\n{}",
+            &entries[entries.len().saturating_sub(200)..]
+        );
+        // Full counts stay visible in the summary.
+        assert!(summary.contains("1000 files"), "summary was: {}", summary);
+    }
+
+    #[test]
+    fn test_compact_small_listing_not_truncated() {
+        // Normal-sized directories are unaffected by the cap.
+        let input = "total 48\n\
+                     -rw-r--r--  1 user  staff  1234 Jan  1 12:00 a.txt\n\
+                     -rw-r--r--  1 user  staff  5678 Jan  1 12:00 b.txt\n";
+        let (entries, _summary, _parsed) = compact_ls(input, false, false);
+        assert!(!entries.contains("more entries"));
+        assert!(entries.contains("a.txt"));
+        assert!(entries.contains("b.txt"));
+    }
 
     #[test]
     fn test_compact_basic() {
