@@ -1,0 +1,29 @@
+[filters.bazel]
+description = "Compact Bazel output — strip INFO/loading/analyzing/progress noise"
+match_command = "^bazel\\b"
+strip_ansi = true
+strip_lines_matching = [
+  "^\\s*$",
+  "^INFO: ",
+  "^Loading:",
+  "^Analyzing:",
+  "^\\[\\d+ / \\d+\\]",
+]
+max_lines = 60
+
+[[tests.bazel]]
+name = "strips info and progress noise, keeps target output"
+input = """
+INFO: Analyzed target //src:main (0 packages loaded).
+Loading: 0 packages loaded
+[12 / 45] Compiling src/main.cc
+Target //src:main up-to-date:
+  bazel-bin/src/main
+INFO: Build completed successfully, 5 total actions
+"""
+expected = "Target //src:main up-to-date:\n  bazel-bin/src/main"
+
+[[tests.bazel]]
+name = "error line passes through"
+input = "ERROR: /workspace/BUILD:3:1: error in cc_binary rule //src:main"
+expected = "ERROR: /workspace/BUILD:3:1: error in cc_binary rule //src:main"

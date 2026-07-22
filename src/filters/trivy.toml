@@ -1,0 +1,25 @@
+[filters.trivy]
+description = "Compact Trivy output — strip timestamped INFO logs, keep results table"
+match_command = "^trivy\\b"
+strip_ansi = true
+strip_lines_matching = [
+  "^\\s*$",
+  "^\\d{4}-\\d{2}-\\d{2}T",
+]
+max_lines = 60
+
+[[tests.trivy]]
+name = "strips timestamped logs, keeps results"
+input = """
+2024-01-15T10:00:00Z	INFO	Vulnerability scanning is enabled
+2024-01-15T10:00:01Z	INFO	Detected OS: alpine
+
+myimage (alpine 3.18)
+Total: 2 (HIGH: 1, CRITICAL: 1)
+"""
+expected = "myimage (alpine 3.18)\nTotal: 2 (HIGH: 1, CRITICAL: 1)"
+
+[[tests.trivy]]
+name = "clean result passes through"
+input = "Total: 0 (HIGH: 0, CRITICAL: 0)"
+expected = "Total: 0 (HIGH: 0, CRITICAL: 0)"

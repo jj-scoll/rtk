@@ -1,0 +1,26 @@
+[filters.journalctl]
+description = "Compact journalctl output — strip boilerplate begin/end markers and blank lines"
+match_command = "^journalctl\\b"
+strip_ansi = true
+strip_lines_matching = [
+  "^-- Logs begin",
+  "^-- Logs end",
+  "^-- No entries",
+  "^\\s*$",
+]
+max_lines = 50
+on_empty = "journalctl: no matching entries"
+
+[[tests.journalctl]]
+name = "strips begin/end markers, keeps log entries"
+input = """
+-- Logs begin at Mon 2024-01-15 10:00:00 UTC, end at Mon 2024-01-15 12:00:00 UTC. --
+Jan 15 10:30:00 host nginx[1234]: started
+Jan 15 10:30:01 host nginx[1234]: listening on 80
+"""
+expected = "Jan 15 10:30:00 host nginx[1234]: started\nJan 15 10:30:01 host nginx[1234]: listening on 80"
+
+[[tests.journalctl]]
+name = "no entries collapses to on_empty message"
+input = "-- No entries --"
+expected = "journalctl: no matching entries"

@@ -1,0 +1,21 @@
+[filters.podman]
+description = "Compact Podman output — strip blank lines, cap width and length"
+match_command = "^podman\\b"
+strip_ansi = true
+strip_lines_matching = ["^\\s*$"]
+truncate_lines_at = 120
+max_lines = 40
+
+[[tests.podman]]
+name = "strips trailing blank lines, preserves table"
+input = """
+CONTAINER ID  IMAGE              STATUS
+abc123        docker.io/nginx    Up 2 hours
+
+"""
+expected = "CONTAINER ID  IMAGE              STATUS\nabc123        docker.io/nginx    Up 2 hours"
+
+[[tests.podman]]
+name = "single line passes through"
+input = "Error: no container with name or ID \"foo\" found"
+expected = "Error: no container with name or ID \"foo\" found"

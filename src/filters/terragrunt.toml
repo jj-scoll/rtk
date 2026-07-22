@@ -1,0 +1,30 @@
+[filters.terragrunt]
+description = "Compact Terragrunt output — strip info/debug logs and terraform state noise"
+match_command = "^terragrunt\\b"
+strip_ansi = true
+strip_lines_matching = [
+  "^time=\\S+ level=(info|debug|trace)",
+  "^Refreshing state",
+  "^Acquiring state lock",
+  "^Releasing state lock",
+  "^Initializing the backend",
+  "^\\s*$",
+]
+max_lines = 80
+
+[[tests.terragrunt]]
+name = "strips info logs and state noise, keeps the plan"
+input = """
+time=2024-01-15T10:00:00Z level=info msg=Running command: terraform init
+Refreshing state... [id=abc]
+
+Terraform will perform the following actions:
+  # aws_instance.web will be created
+Plan: 1 to add, 0 to change, 0 to destroy.
+"""
+expected = "Terraform will perform the following actions:\n  # aws_instance.web will be created\nPlan: 1 to add, 0 to change, 0 to destroy."
+
+[[tests.terragrunt]]
+name = "error log line passes through"
+input = "time=2024-01-15T10:00:00Z level=error msg=Error reading file"
+expected = "time=2024-01-15T10:00:00Z level=error msg=Error reading file"

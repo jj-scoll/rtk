@@ -1,0 +1,26 @@
+[filters.bun]
+description = "Compact bun output — strip resolve/install timing and progress noise"
+match_command = "^bun\\b"
+strip_ansi = true
+strip_lines_matching = [
+  "^\\s*$",
+  "^\\s*\\[\\d+\\.\\d+ms\\]",
+  "^Resolving dependencies",
+]
+max_lines = 40
+
+[[tests.bun]]
+name = "strips timing and blank lines, keeps result"
+input = """
+bun install v1.1.0
+[0.50ms] resolving
+Resolving dependencies
+
++ express@4.18.2
+"""
+expected = "bun install v1.1.0\n+ express@4.18.2"
+
+[[tests.bun]]
+name = "error line passes through"
+input = "error: failed to resolve package \"foo\""
+expected = "error: failed to resolve package \"foo\""

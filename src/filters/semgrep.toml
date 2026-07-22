@@ -1,0 +1,28 @@
+[filters.semgrep]
+description = "Compact semgrep output — strip scan/progress noise, keep findings"
+match_command = "^semgrep\\b"
+strip_ansi = true
+strip_lines_matching = [
+  "^\\s*$",
+  "^Scanning ",
+  "^\\s*\\d+%\\|",
+]
+max_lines = 60
+
+[[tests.semgrep]]
+name = "strips scan and progress noise, keeps findings and summary"
+input = """
+Scanning 42 files with 100 rules.
+  100%|██████████|42/42
+
+test.py
+   rule-id
+      Found issue here
+Ran 100 rules on 42 files: 1 finding.
+"""
+expected = "test.py\n   rule-id\n      Found issue here\nRan 100 rules on 42 files: 1 finding."
+
+[[tests.semgrep]]
+name = "error line passes through"
+input = "error: invalid configuration file"
+expected = "error: invalid configuration file"
