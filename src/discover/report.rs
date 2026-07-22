@@ -98,6 +98,10 @@ pub struct DiscoverReport {
     pub sessions_scanned: usize,
     pub total_commands: usize,
     pub already_rtk: usize,
+    /// Commands the hook auto-rewrites at execution time. The transcript records
+    /// the pre-rewrite form, so these would otherwise look like missed savings —
+    /// but the savings are already captured (see `rtk gain`).
+    pub auto_handled: usize,
     pub since_days: u64,
     pub supported: Vec<SupportedEntry>,
     pub unsupported: Vec<UnsupportedEntry>,
@@ -140,6 +144,17 @@ pub fn format_text(report: &DiscoverReport, limit: usize, verbose: bool) -> Stri
             0.0
         }
     ));
+    if report.auto_handled > 0 {
+        out.push_str(&format!(
+            "Auto-handled by hook: {} commands ({:.1}%) -- savings already captured (see `rtk gain`)\n",
+            report.auto_handled,
+            if report.total_commands > 0 {
+                report.auto_handled as f64 * 100.0 / report.total_commands as f64
+            } else {
+                0.0
+            }
+        ));
+    }
 
     if report.supported.is_empty() && report.unsupported.is_empty() {
         out.push_str("\nNo missed savings found. RTK usage looks good!\n");
@@ -279,6 +294,7 @@ mod tests {
             sessions_scanned: 1,
             total_commands,
             already_rtk,
+            auto_handled: 0,
             since_days: 30,
             supported: vec![],
             unsupported: vec![],
@@ -314,6 +330,32 @@ mod tests {
         let report = make_report(0, 0);
         let output = format_text(&report, 10, false);
         assert!(output.contains("0 commands (0.0%)"));
+    }
+
+    // Auto-handled commands (rewritten by the hook at execution time) are reported
+    // as already captured, not as missed opportunities.
+    #[test]
+    fn test_auto_handled_line_shown() {
+        let mut report = make_report(100, 5);
+        report.auto_handled = 40;
+        let output = format_text(&report, 10, false);
+        assert!(
+            output.contains("Auto-handled by hook: 40"),
+            "Expected auto-handled line in output but got:\n{}",
+            output
+        );
+    }
+
+    // When nothing was auto-handled, the line is omitted to avoid noise.
+    #[test]
+    fn test_auto_handled_line_hidden_when_zero() {
+        let report = make_report(100, 5);
+        let output = format_text(&report, 10, false);
+        assert!(
+            !output.contains("Auto-handled by hook"),
+            "Auto-handled line must be hidden when count is 0:\n{}",
+            output
+        );
     }
 
     // Full percent: 1000/1000 = 100.0%
