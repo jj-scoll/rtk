@@ -1834,16 +1834,23 @@ match_command = "^make\\b"
 
         let expected = [
             "ansible-playbook",
+            "az",
+            "bazel",
             "brew-install",
+            "bun",
             "composer-install",
+            "conda",
+            "deno",
             "df",
             "dotnet-build",
             "du",
             "fail2ban-client",
             "gcloud",
+            "gem",
             "hadolint",
             "helm",
             "iptables",
+            "journalctl",
             "liquibase",
             "make",
             "markdownlint",
@@ -1851,6 +1858,7 @@ match_command = "^make\\b"
             "mix-format",
             "ping",
             "pio-run",
+            "podman",
             "poetry-install",
             "pre-commit",
             "ps",
@@ -1861,19 +1869,25 @@ match_command = "^make\\b"
             "pulumi-up",
             "quarto-render",
             "rsync",
+            "semgrep",
             "shellcheck",
             "shopify-theme",
             "sops",
             "swift-build",
             "systemctl-status",
+            "terraform-fmt",
             "terraform-plan",
+            "terragrunt",
             "tofu-fmt",
             "tofu-init",
             "tofu-plan",
             "tofu-validate",
+            "tox",
+            "trivy",
             "trunk-build",
             "uv-sync",
             "yamllint",
+            "yarn",
         ];
 
         for name in &expected {
@@ -1892,8 +1906,8 @@ match_command = "^make\\b"
         let filters = make_filters(BUILTIN_TOML);
         assert_eq!(
             filters.len(),
-            63,
-            "Expected exactly 63 built-in filters, got {}. \
+            77,
+            "Expected exactly 77 built-in filters, got {}. \
              Update this count when adding/removing filters in src/filters/.",
             filters.len()
         );
@@ -1950,11 +1964,11 @@ expected = "output line 1\noutput line 2"
         let combined = format!("{}\n\n{}", BUILTIN_TOML, new_filter);
         let filters = make_filters(&combined);
 
-        // All 63 existing filters still present + 1 new = 64
+        // All 77 existing filters still present + 1 new = 78
         assert_eq!(
             filters.len(),
-            64,
-            "Expected 64 filters after concat (63 built-in + 1 new)"
+            78,
+            "Expected 78 filters after concat (77 built-in + 1 new)"
         );
 
         // New filter is discoverable

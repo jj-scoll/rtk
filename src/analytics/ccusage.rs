@@ -53,9 +53,9 @@ struct DailyResponse {
 
 #[derive(Debug, Deserialize)]
 struct DailyEntry {
-    // Older ccusage emits "date"; current ccusage emits "period". Accept both.
-    #[serde(alias = "period")]
-    date: String,
+    // ccusage renamed the key field `date` → `period`; alias keeps old output working.
+    #[serde(alias = "date")]
+    period: String,
     #[serde(flatten)]
     metrics: CcusageMetrics,
 }
@@ -67,9 +67,9 @@ struct WeeklyResponse {
 
 #[derive(Debug, Deserialize)]
 struct WeeklyEntry {
-    // Older ccusage emits "week"; current ccusage emits "period". Accept both.
-    #[serde(alias = "period")]
-    week: String, // ISO week start (Monday)
+    // ISO week start (Monday); ccusage renamed `week` → `period`.
+    #[serde(alias = "week")]
+    period: String,
     #[serde(flatten)]
     metrics: CcusageMetrics,
 }
@@ -81,9 +81,9 @@ struct MonthlyResponse {
 
 #[derive(Debug, Deserialize)]
 struct MonthlyEntry {
-    // Older ccusage emits "month"; current ccusage emits "period". Accept both.
-    #[serde(alias = "period")]
-    month: String,
+    // ccusage renamed `month` → `period`.
+    #[serde(alias = "month")]
+    period: String,
     #[serde(flatten)]
     metrics: CcusageMetrics,
 }
@@ -180,7 +180,7 @@ fn parse_json(json: &str, granularity: Granularity) -> Result<Vec<CcusagePeriod>
                 .daily
                 .into_iter()
                 .map(|e| CcusagePeriod {
-                    key: e.date,
+                    key: e.period,
                     metrics: e.metrics,
                 })
                 .collect())
@@ -192,7 +192,7 @@ fn parse_json(json: &str, granularity: Granularity) -> Result<Vec<CcusagePeriod>
                 .weekly
                 .into_iter()
                 .map(|e| CcusagePeriod {
-                    key: e.week,
+                    key: e.period,
                     metrics: e.metrics,
                 })
                 .collect())
@@ -204,7 +204,7 @@ fn parse_json(json: &str, granularity: Granularity) -> Result<Vec<CcusagePeriod>
                 .monthly
                 .into_iter()
                 .map(|e| CcusagePeriod {
-                    key: e.month,
+                    key: e.period,
                     metrics: e.metrics,
                 })
                 .collect())
@@ -306,6 +306,87 @@ mod tests {
         }"#;
         let result = parse_json(json, Granularity::Monthly);
         assert!(result.is_err()); // Missing required fields like totalTokens
+    }
+
+    // ── New ccusage schema (period key + extra fields) — issue: schema drift ──
+    // Newer ccusage renamed the granularity key (date/week/month) to a unified
+    // `period` and added agent/metadata/modelBreakdowns/modelsUsed fields.
+
+    #[test]
+    fn test_parse_daily_new_schema_period_key() {
+        let json = r#"{
+            "daily": [
+                {
+                    "period": "2026-01-08",
+                    "agent": "all",
+                    "metadata": { "agents": ["gemini"] },
+                    "modelsUsed": ["gemini-3-pro-preview"],
+                    "modelBreakdowns": [
+                        { "modelName": "gemini-3-pro-preview", "inputTokens": 1, "outputTokens": 2, "cacheCreationTokens": 0, "cacheReadTokens": 0, "cost": 1.0 }
+                    ],
+                    "inputTokens": 100,
+                    "outputTokens": 50,
+                    "cacheCreationTokens": 0,
+                    "cacheReadTokens": 200,
+                    "totalTokens": 350,
+                    "totalCost": 0.15
+                }
+            ],
+            "totals": {}
+        }"#;
+
+        let periods = parse_json(json, Granularity::Daily).expect("new daily schema should parse");
+        assert_eq!(periods.len(), 1);
+        assert_eq!(periods[0].key, "2026-01-08");
+        assert_eq!(periods[0].metrics.input_tokens, 100);
+        assert_eq!(periods[0].metrics.cache_read_tokens, 200);
+        assert_eq!(periods[0].metrics.total_cost, 0.15);
+    }
+
+    #[test]
+    fn test_parse_weekly_new_schema_period_key() {
+        let json = r#"{
+            "weekly": [
+                {
+                    "period": "2026-01-05",
+                    "agent": "all",
+                    "inputTokens": 500,
+                    "outputTokens": 250,
+                    "totalTokens": 750,
+                    "totalCost": 5.67
+                }
+            ],
+            "totals": {}
+        }"#;
+
+        let periods =
+            parse_json(json, Granularity::Weekly).expect("new weekly schema should parse");
+        assert_eq!(periods.len(), 1);
+        assert_eq!(periods[0].key, "2026-01-05");
+        assert_eq!(periods[0].metrics.input_tokens, 500);
+    }
+
+    #[test]
+    fn test_parse_monthly_new_schema_period_key() {
+        let json = r#"{
+            "monthly": [
+                {
+                    "period": "2026-01",
+                    "agent": "all",
+                    "inputTokens": 1000,
+                    "outputTokens": 500,
+                    "totalTokens": 1500,
+                    "totalCost": 12.34
+                }
+            ],
+            "totals": {}
+        }"#;
+
+        let periods =
+            parse_json(json, Granularity::Monthly).expect("new monthly schema should parse");
+        assert_eq!(periods.len(), 1);
+        assert_eq!(periods[0].key, "2026-01");
+        assert_eq!(periods[0].metrics.total_cost, 12.34);
     }
 
     #[test]
