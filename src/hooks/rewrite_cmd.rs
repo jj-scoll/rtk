@@ -45,8 +45,20 @@ enum RewriteOutcome {
 }
 
 fn evaluate(cmd: &str, excluded: &[String], transparent_prefixes: &[String]) -> RewriteOutcome {
-    let verdict = check_command(cmd);
+    evaluate_with_verdict(cmd, excluded, transparent_prefixes, check_command(cmd))
+}
 
+/// Same as `evaluate`, but takes the permission verdict as a parameter instead
+/// of resolving it from real settings files on disk. Lets tests exercise the
+/// rewrite/verdict interaction without depending on the machine's actual
+/// `~/.claude/settings.json` (see `check_command_with_rules` for the same
+/// seam on the permissions side).
+fn evaluate_with_verdict(
+    cmd: &str,
+    excluded: &[String],
+    transparent_prefixes: &[String],
+    verdict: PermissionVerdict,
+) -> RewriteOutcome {
     if verdict == PermissionVerdict::Deny {
         return RewriteOutcome::Deny;
     }
@@ -91,7 +103,8 @@ mod tests {
     }
 
     mod unattestable_passthrough {
-        use super::super::{evaluate, RewriteOutcome};
+        use super::super::{evaluate, evaluate_with_verdict, RewriteOutcome};
+        use crate::hooks::permissions::PermissionVerdict;
 
         #[test]
         fn test_backtick_substitution_passthrough() {
@@ -127,8 +140,11 @@ mod tests {
 
         #[test]
         fn test_fd_dup_redirect_still_rewrites() {
+            // Verdict pinned to Default (not read from the real machine's
+            // settings.json) so this doesn't depend on whether `git *` happens
+            // to be allow-listed locally.
             assert!(matches!(
-                evaluate("git status 2>&1", &[], &[]),
+                evaluate_with_verdict("git status 2>&1", &[], &[], PermissionVerdict::Default),
                 RewriteOutcome::Ask(_)
             ));
         }
@@ -136,7 +152,7 @@ mod tests {
         #[test]
         fn test_plain_command_still_rewrites() {
             assert!(matches!(
-                evaluate("git status", &[], &[]),
+                evaluate_with_verdict("git status", &[], &[], PermissionVerdict::Default),
                 RewriteOutcome::Ask(_)
             ));
         }
