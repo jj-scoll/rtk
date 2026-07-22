@@ -9,6 +9,9 @@ pub const CAP_WARNINGS: usize = 10;
 pub const CAP_LIST: usize = 20;
 /// Inventories (`pip list`, `docker images`): exhaustive lookups.
 pub const CAP_INVENTORY: usize = 50;
+/// Directory listings (`ls`): generous so normal directories pass untouched,
+/// but pathological ones (`ls /nix/store`, ~50K entries) can't flood the context.
+pub const CAP_DIR_ENTRIES: usize = 200;
 
 /// A cap reduced for a verbose data class. Falls back to `cap` when `by >= cap`
 /// so a deviation can never empty the list; `0` stays `0`. `const fn`, underflow-safe.
