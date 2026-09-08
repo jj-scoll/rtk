@@ -914,11 +914,11 @@ impl Tracker {
     ) -> Result<Vec<(String, usize)>> {
         let (project_exact, project_glob) = project_filter_params(project_path); // added
         let mut stmt = self.conn.prepare(
-            "SELECT DATE(timestamp), SUM(saved_tokens)
+            "SELECT DATE(timestamp, 'localtime'), SUM(saved_tokens)
              FROM commands
              WHERE (?1 IS NULL OR project_path = ?1 OR project_path GLOB ?2)
-             GROUP BY DATE(timestamp)
-             ORDER BY DATE(timestamp) DESC
+             GROUP BY DATE(timestamp, 'localtime')
+             ORDER BY DATE(timestamp, 'localtime') DESC
              LIMIT 30", // added: project filter in WHERE
         )?;
 
@@ -959,7 +959,7 @@ impl Tracker {
         let (project_exact, project_glob) = project_filter_params(project_path); // added
         let mut stmt = self.conn.prepare(
             "SELECT
-                DATE(timestamp) as date,
+                DATE(timestamp, 'localtime') as date,
                 COUNT(*) as commands,
                 SUM(input_tokens) as input,
                 SUM(output_tokens) as output,
@@ -967,8 +967,8 @@ impl Tracker {
                 SUM(exec_time_ms) as total_time
              FROM commands
              WHERE (?1 IS NULL OR project_path = ?1 OR project_path GLOB ?2)
-             GROUP BY DATE(timestamp)
-             ORDER BY DATE(timestamp) DESC", // added: project filter
+             GROUP BY DATE(timestamp, 'localtime')
+             ORDER BY DATE(timestamp, 'localtime') DESC", // added: project filter
         )?;
 
         let rows = stmt.query_map(params![project_exact, project_glob], |row| {
@@ -1032,8 +1032,8 @@ impl Tracker {
         let (project_exact, project_glob) = project_filter_params(project_path); // added
         let mut stmt = self.conn.prepare(
             "SELECT
-                DATE(timestamp, 'weekday 0', '-6 days') as week_start,
-                DATE(timestamp, 'weekday 0') as week_end,
+                DATE(timestamp, 'localtime', 'weekday 0', '-6 days') as week_start,
+                DATE(timestamp, 'localtime', 'weekday 0') as week_end,
                 COUNT(*) as commands,
                 SUM(input_tokens) as input,
                 SUM(output_tokens) as output,
@@ -1107,7 +1107,7 @@ impl Tracker {
         let (project_exact, project_glob) = project_filter_params(project_path); // added
         let mut stmt = self.conn.prepare(
             "SELECT
-                strftime('%Y-%m', timestamp) as month,
+                strftime('%Y-%m', timestamp, 'localtime') as month,
                 COUNT(*) as commands,
                 SUM(input_tokens) as input,
                 SUM(output_tokens) as output,
@@ -1372,7 +1372,7 @@ impl Tracker {
             .format("%Y-%m-%dT%H:%M:%S")
             .to_string();
         let count: i64 = self.conn.query_row(
-            "SELECT COUNT(DISTINCT DATE(timestamp)) FROM commands WHERE timestamp >= ?1",
+            "SELECT COUNT(DISTINCT DATE(timestamp, 'localtime')) FROM commands WHERE timestamp >= ?1",
             params![since],
             |row| row.get(0),
         )?;
@@ -2422,5 +2422,46 @@ mod tests {
         for cmd in ["rtk bun install", "rtk bunx cowsay", "rtk deno test"] {
             assert_eq!(categorize_command(cmd), "js", "{cmd}");
         }
+    }
+
+    fn insert_at(tracker: &Tracker, utc_ts: &str) {
+        tracker
+            .conn
+            .execute(
+                "INSERT INTO commands (timestamp, original_cmd, rtk_cmd, project_path, input_tokens, output_tokens, saved_tokens, savings_pct, exec_time_ms)
+                 VALUES (?1, 'git status', 'rtk git status', '/tmp/tz_test', 100, 20, 80, 80.0, 5)",
+                params![utc_ts],
+            )
+            .expect("Failed to insert test row");
+    }
+
+    fn local_date_of(utc_ts: &str) -> chrono::NaiveDate {
+        DateTime::parse_from_rfc3339(utc_ts)
+            .expect("valid rfc3339")
+            .with_timezone(&chrono::Local)
+            .date_naive()
+    }
+
+    #[test]
+    fn test_daily_stats_bucket_by_local_date() {
+        let tracker = Tracker::new_in_memory().expect("Failed to create in-memory tracker");
+        let utc_ts = "2026-06-03T00:30:00+00:00";
+        insert_at(&tracker, utc_ts);
+
+        let expected = local_date_of(utc_ts).to_string();
+
+        let days = tracker.get_all_days().expect("Failed to get daily stats");
+        assert_eq!(days.len(), 1);
+        assert_eq!(
+            days[0].date, expected,
+            "daily bucket must use the local date, not the UTC date"
+        );
+
+        let summary = tracker.get_summary().expect("Failed to get summary");
+        assert_eq!(
+            summary.by_day,
+            vec![(expected, 80)],
+            "activity series must bucket by local date"
+        );
     }
 }
