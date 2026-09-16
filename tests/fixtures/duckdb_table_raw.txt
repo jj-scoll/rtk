@@ -1,0 +1,47 @@
+[90m-- Loading resources from /home/user/.duckdbrc
+[00m┌───────────────┬─────────────┬────────────────────────┬────────────────┬──────────────┐
+│ database_name │ schema_name │       table_name       │ estimated_size │ column_count │
+│    varchar    │   varchar   │        varchar         │     int64      │    int64     │
+├───────────────┼─────────────┼────────────────────────┼────────────────┼──────────────┤
+│ demo          │ main        │ demo_Addresses         │              1 │            3 │
+│ demo          │ main        │ demo_AuditEvents       │              0 │            3 │
+│ demo          │ main        │ demo_Carriers          │              3 │            3 │
+│ demo          │ main        │ demo_Contacts          │              2 │            3 │
+│ demo          │ main        │ demo_Currencies        │              2 │            3 │
+│ demo          │ main        │ demo_Customers         │              2 │            3 │
+│ demo          │ main        │ demo_Departments       │              1 │            3 │
+│ demo          │ main        │ demo_Discounts         │              0 │            3 │
+│ demo          │ main        │ demo_Employees         │              0 │            3 │
+│ demo          │ main        │ demo_ExchangeRates     │              3 │            3 │
+│ demo          │ main        │ demo_Inventory         │              0 │            3 │
+│ demo          │ main        │ demo_InvoiceLines      │              0 │            3 │
+│ demo          │ main        │ demo_Invoices          │              3 │            3 │
+│ demo          │ main        │ demo_OrderLines        │              1 │            3 │
+│ demo          │ main        │ demo_Orders            │              0 │            3 │
+│ demo          │ main        │ demo_PaymentMethods    │              2 │            3 │
+│ demo          │ main        │ demo_Payments          │              1 │            3 │
+│ demo          │ main        │ demo_Permissions       │              3 │            3 │
+│ demo          │ main        │ demo_PriceLists        │              3 │            3 │
+│ demo          │ main        │ demo_ProductCategories │              0 │            3 │
+│ demo          │ main        │ demo_Products          │              3 │            3 │
+│ demo          │ main        │ demo_Promotions        │              1 │            3 │
+│ demo          │ main        │ demo_Refunds           │              3 │            3 │
+│ demo          │ main        │ demo_Regions           │              2 │            3 │
+│ demo          │ main        │ demo_ReturnReasons     │              1 │            3 │
+│ demo          │ main        │ demo_Returns           │              0 │            3 │
+│ demo          │ main        │ demo_Reviews           │              2 │            3 │
+│ demo          │ main        │ demo_Roles             │              2 │            3 │
+│ demo          │ main        │ demo_Sessions          │              1 │            3 │
+│ demo          │ main        │ demo_Shipments         │              2 │            3 │
+│ demo          │ main        │ demo_StockMovements    │              2 │            3 │
+│ demo          │ main        │ demo_Suppliers         │              1 │            3 │
+│ demo          │ main        │ demo_TaxRates          │              0 │            3 │
+│ demo          │ main        │ demo_Territories       │              3 │            3 │
+│ demo          │ main        │ demo_Warehouses        │              1 │            3 │
+└───────────────┴─────────────┴────────────────────────┴────────────────┴──────────────┘
+  35 rows                                                                    5 columns
+┌─────────────┬─────────────────┐
+│ constraints │ constraint_type │
+│   varchar   │     varchar     │
+└─────────────┴─────────────────┘
+             0 rows            

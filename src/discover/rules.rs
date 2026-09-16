@@ -671,6 +671,17 @@ pub const RULES: &[RtkRule] = &[
         savings_pct: 75.0,
         ..RtkRule::DEFAULT
     },
+    RtkRule {
+        pattern: r"^duckdb(\s|$)",
+        rtk_cmd: "rtk duckdb",
+        rewrite_prefixes: &["duckdb"],
+        category: "Infra",
+        // Measured end-to-end: 2383B raw stdout -> 551B filtered on a 15-table
+        // duckdb_tables() query. Box borders are 3-byte UTF-8 and every cell is
+        // padded to the column width, so framing dominates small result sets.
+        savings_pct: 76.0,
+        ..RtkRule::DEFAULT
+    },
     // Bun/Deno
     RtkRule {
         pattern: r"^bun\s+(install|add|remove|test|build|run|pm\s+ls|pm|x)\b",

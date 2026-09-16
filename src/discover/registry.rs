@@ -3774,6 +3774,25 @@ mod tests {
         );
     }
 
+    #[test]
+    fn test_rewrite_duckdb() {
+        for cmd in [
+            r#"duckdb x.db -c "SELECT 1""#,
+            r#"duckdb -readonly x.db -c "SELECT 1""#,
+        ] {
+            assert_eq!(
+                rewrite_command_no_prefixes(cmd, &[]),
+                Some(format!("rtk {cmd}")),
+                "cmd: {cmd}"
+            );
+        }
+        // `timeout` is transparent, so the inner duckdb still routes.
+        assert_eq!(
+            rewrite_command_no_prefixes(r#"timeout 60 duckdb x.db -c "SELECT 1""#, &[]),
+            Some(r#"timeout 60 rtk duckdb x.db -c "SELECT 1""#.into())
+        );
+    }
+
     // --- Python tooling ---
 
     #[test]
