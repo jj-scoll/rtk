@@ -66,7 +66,25 @@ static ENV_PREFIX: LazyLock<Regex> = LazyLock::new(|| {
     let unquoted = r#"[^\s]*"#;
     let env_value = format!("(?:{}|{}|{})", double_quoted, single_quoted, unquoted);
     let env_assign = format!(r#"[A-Z_][A-Z0-9_]*={}"#, env_value);
-    Regex::new(&format!(r#"^(?:sudo\s+|env\s+|{}\s+)+"#, env_assign)).unwrap()
+    // `timeout [OPTION]... DURATION` is a transparent wrapper in the same sense
+    // as sudo/env: it changes how the command runs, not which one. Options that
+    // take a value (-k/--kill-after, -s/--signal) must consume it, or the value
+    // would be mistaken for the DURATION. Without a DURATION token this is not
+    // the wrapper form (`timeout --help`), so the alternative fails and the
+    // command passes through untouched.
+    let timeout_opt = concat!(
+        r"(?:(?:-k|--kill-after|-s|--signal)(?:=\S+|\s+\S+|\S+)",
+        r"|-[fpv]+|--foreground|--preserve-status|--verbose)"
+    );
+    let timeout = format!(
+        r"timeout\s+(?:{}\s+)*[0-9]+(?:\.[0-9]+)?[smhd]?",
+        timeout_opt
+    );
+    Regex::new(&format!(
+        r#"^(?:sudo\s+|env\s+|{}\s+|{}\s+)+"#,
+        env_assign, timeout
+    ))
+    .unwrap()
 });
 // Git global options that appear before the subcommand: -C <path>, -c <key=val>,
 // --git-dir <dir>, --work-tree <dir>, and flag-only options (#163)
@@ -80,6 +98,10 @@ static GIT_GLOBAL_OPT: LazyLock<Regex> = LazyLock::new(|| {
 static HEAD_N: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^head\s+-(\d+)\s+(\S+)$").unwrap());
 static HEAD_LINES: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"^head\s+--lines=(\d+)\s+(\S+)$").unwrap());
+static HEAD_N_SPACE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^head\s+-n\s+(\d+)\s+(\S+)$").unwrap());
+static HEAD_LINES_SPACE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^head\s+--lines\s+(\d+)\s+(\S+)$").unwrap());
 static TAIL_N: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^tail\s+-(\d+)\s+(\S+)$").unwrap());
 static TAIL_N_SPACE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"^tail\s+-n\s+(\d+)\s+(\S+)$").unwrap());
@@ -150,7 +172,17 @@ pub fn classify_command(cmd: &str) -> Classification {
             .split_whitespace()
             .skip(1)
             .any(|t| t.starts_with('>') || t == "<" || t.starts_with(">>"));
-        if has_redirect {
+        // `-c`/`--bytes` is byte-oriented but `rtk read` is line-oriented, so
+        // rewrite_line_range refuses it. Classify must agree, or discover bills
+        // savings the rewriter will never deliver. `cat -c` is not a byte flag.
+        let byte_mode = !cmd_clean.starts_with("cat ")
+            && cmd_clean.split_whitespace().skip(1).any(|t| {
+                t == "-c"
+                    || t.starts_with("--bytes")
+                    || t.strip_prefix("-c")
+                        .is_some_and(|n| !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit()))
+            });
+        if has_redirect || byte_mode {
             return Classification::Unsupported {
                 base_command: cmd_clean
                     .split_whitespace()
@@ -1173,7 +1205,7 @@ fn rewrite_compound(
 }
 
 fn rewrite_line_range(cmd: &str) -> Option<String> {
-    for re in [&*HEAD_N, &*HEAD_LINES] {
+    for re in [&*HEAD_N, &*HEAD_N_SPACE, &*HEAD_LINES, &*HEAD_LINES_SPACE] {
         if let Some(caps) = re.captures(cmd) {
             let n = caps.get(1)?.as_str();
             let file = caps.get(2)?.as_str();
@@ -3109,6 +3141,42 @@ mod tests {
     }
 
     #[test]
+    fn test_rewrite_head_n_space_flag() {
+        // head -n 50 file: the space form tail already supports (TAIL_N_SPACE).
+        assert_eq!(
+            rewrite_command_no_prefixes("head -n 50 src/lib.rs", &[]),
+            Some("rtk read src/lib.rs --max-lines 50".into())
+        );
+    }
+
+    #[test]
+    fn test_rewrite_head_lines_space_flag() {
+        // head --lines 50 file: space form, mirror of TAIL_LINES_SPACE.
+        assert_eq!(
+            rewrite_command_no_prefixes("head --lines 50 src/lib.rs", &[]),
+            Some("rtk read src/lib.rs --max-lines 50".into())
+        );
+    }
+
+    #[test]
+    fn test_classify_head_byte_flag_unsupported() {
+        // `head -c` is byte-oriented; `rtk read` is line-oriented, so
+        // rewrite_line_range refuses it. classify must agree, or discover
+        // reports savings the rewriter will never deliver.
+        for cmd in ["head -c 2000 README.md", "tail -c 2000 README.md"] {
+            match classify_command(cmd) {
+                Classification::Unsupported { base_command } => {
+                    assert!(
+                        base_command == "head" || base_command == "tail",
+                        "unexpected base_command {base_command} for {cmd}"
+                    );
+                }
+                other => panic!("expected Unsupported for {cmd}, got {other:?}"),
+            }
+        }
+    }
+
+    #[test]
     fn test_rewrite_head_no_flag_still_rewrites() {
         // plain `head file` → `rtk read file` (no numeric flag)
         assert_eq!(
@@ -3124,6 +3192,78 @@ mod tests {
             rewrite_command_no_prefixes("head -c 100 src/main.rs", &[]),
             None
         );
+    }
+
+    #[test]
+    fn test_rewrite_timeout_wrapper() {
+        // `timeout DURATION cmd` is a transparent wrapper: keep it, insert rtk
+        // after it, exactly as sudo/env are handled.
+        for (input, want) in [
+            ("timeout 60 cargo test", "timeout 60 rtk cargo test"),
+            (
+                "timeout 900 uv run pytest tests/",
+                "timeout 900 uv run rtk pytest tests/",
+            ),
+            ("timeout 1.5h cargo build", "timeout 1.5h rtk cargo build"),
+            ("timeout 30s git status", "timeout 30s rtk git status"),
+        ] {
+            assert_eq!(
+                rewrite_command_no_prefixes(input, &[]),
+                Some(want.to_string()),
+                "input: {input}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_rewrite_timeout_with_options() {
+        for (input, want) in [
+            (
+                "timeout -k 10 900 cargo test",
+                "timeout -k 10 900 rtk cargo test",
+            ),
+            (
+                "timeout -k10 900 cargo test",
+                "timeout -k10 900 rtk cargo test",
+            ),
+            (
+                "timeout --signal=KILL 30 git status",
+                "timeout --signal=KILL 30 rtk git status",
+            ),
+            (
+                "timeout --preserve-status 30 git status",
+                "timeout --preserve-status 30 rtk git status",
+            ),
+        ] {
+            assert_eq!(
+                rewrite_command_no_prefixes(input, &[]),
+                Some(want.to_string()),
+                "input: {input}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_rewrite_timeout_without_duration_untouched() {
+        // No DURATION token means this is not the wrapper form; pass through
+        // rather than guessing.
+        for input in ["timeout --help", "timeout", "timeout --verbose"] {
+            assert_eq!(
+                rewrite_command_no_prefixes(input, &[]),
+                None,
+                "input: {input}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_classify_timeout_sees_inner_command() {
+        // discover must count `timeout 900 uv run pytest` as pytest, not as a
+        // `timeout 900` command of its own.
+        match classify_command("timeout 900 uv run pytest tests/") {
+            Classification::Supported { .. } => {}
+            other => panic!("expected Supported, got {other:?}"),
+        }
     }
 
     #[test]
@@ -6115,15 +6255,20 @@ mod tests {
     /// `jj` is covered only by a TOML filter, never by the native RULES table,
     /// so the bare case pins the TOML branch of the rewrite path and keeps the
     /// wrapper assertions below from passing vacuously when TOML is disabled.
+    ///
+    /// `timeout` is a transparent wrapper, so its inner command is rewritten and
+    /// the path-qualified argv[0] is carried through verbatim — `rtk <abs-path>`
+    /// execs that exact binary, so nothing is re-resolved via PATH. `nohup` is
+    /// not in the transparent set, so it still passes through untouched.
     #[test]
-    fn test_toml_filter_rewrites_bare_command_but_not_wrapped_invocations() {
+    fn test_toml_filter_rewrites_bare_and_timeout_wrapped_but_not_nohup() {
         assert_eq!(
             rewrite_command_no_prefixes("jj log", &[]),
             Some("rtk jj log".into()),
         );
         assert_eq!(
             rewrite_command_no_prefixes("timeout 5 /usr/bin/jj log", &[]),
-            None,
+            Some("timeout 5 rtk /usr/bin/jj log".into()),
         );
         assert_eq!(
             rewrite_command_no_prefixes("nohup /opt/tools/jj log", &[]),
