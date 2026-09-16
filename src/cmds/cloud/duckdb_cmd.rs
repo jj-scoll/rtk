@@ -166,7 +166,9 @@ mod tests {
 
     #[test]
     fn test_duckdb_truncates_long_tables() {
-        let mut t = String::from("\u{250c}\u{2500}\u{2510}\n\u{2502} id \u{2502}\n\u{2502} int64 \u{2502}\n\u{251c}\u{2500}\u{2524}\n");
+        let mut t = String::from(
+            "\u{250c}\u{2500}\u{2510}\n\u{2502} id \u{2502}\n\u{2502} int64 \u{2502}\n\u{251c}\u{2500}\u{2524}\n",
+        );
         for i in 0..50 {
             t.push_str(&format!("\u{2502} {i} \u{2502}\n"));
         }
@@ -178,7 +180,8 @@ mod tests {
 
     #[test]
     fn test_duckdb_passthrough_non_table() {
-        let err = "Error: Parser Error: syntax error at or near \"SELCT\"\nLINE 1: SELCT 1;\n        ^";
+        let err =
+            "Error: Parser Error: syntax error at or near \"SELCT\"\nLINE 1: SELCT 1;\n        ^";
         assert_eq!(filter_duckdb_output(err), err);
     }
 

@@ -1,0 +1,83 @@
+version: '3'
+
+# Fork-local task runner (jj-scoll/rtk). Upstream ships no Taskfile, so this
+# file never conflicts on a sync. Procedure and conflict-resolution rules:
+# docs/maintainers/FORK-SYNC.md
+
+vars:
+  UPSTREAM_URL: https://github.com/rtk-ai/rtk.git
+  # Override per-sync: task sync REF=v0.49.0
+  REF: '{{.REF | default "upstream/develop"}}'
+
+tasks:
+  default:
+    cmds: [task: --list]
+
+  check:
+    desc: Pre-commit gate — fmt, clippy, full test suite
+    cmds:
+      - cargo fmt --all
+      - cargo clippy --all-targets
+      - cargo test --all
+
+  sync:
+    desc: Merge upstream into this fork (REF=upstream/develop by default)
+    cmds:
+      - |
+        set -euo pipefail
+
+        git diff --quiet && git diff --cached --quiet || {
+          echo "working tree is dirty — commit or stash first" >&2; exit 1
+        }
+
+        git remote get-url upstream >/dev/null 2>&1 \
+          || git remote add upstream {{.UPSTREAM_URL}}
+        git fetch upstream --tags
+
+        # master carries the release version bump, develop carries more code and
+        # a stale version string. See FORK-SYNC.md before changing REF.
+        echo "merging {{.REF}} (Cargo.toml version there: $(git show {{.REF}}:Cargo.toml | grep -m1 '^version'))"
+
+        backup="backup/pre-sync-$(date +%Y%m%d-%H%M%S)"
+        git branch "$backup"
+        echo "undo point: git reset --hard $backup"
+
+        git rev-list --count '@{u}'..HEAD 2>/dev/null | grep -qv '^0$' \
+          && echo "note: local commits not on origin — 'git push origin $(git branch --show-current)' for a remote copy" || true
+
+        if git merge --no-commit --no-ff {{.REF}}; then
+          echo "merged cleanly, nothing committed yet — run: task sync:finish"
+        else
+          echo
+          echo "conflicts in:"
+          git diff --name-only --diff-filter=U | sed 's/^/  /'
+          echo
+          echo "resolve per docs/maintainers/FORK-SYNC.md, 'git add' each file,"
+          echo "then: task sync:finish   (abort with: git merge --abort)"
+          exit 1
+        fi
+
+  sync:finish:
+    desc: Gate the resolved merge, then commit it (never commits a red tree)
+    cmds:
+      - |
+        set -euo pipefail
+
+        test -f .git/MERGE_HEAD || { echo "no merge in progress" >&2; exit 1; }
+
+        git diff --name-only --diff-filter=U | grep -q . && {
+          echo "unresolved conflicts remain:" >&2
+          git diff --name-only --diff-filter=U | sed 's/^/  /' >&2
+          exit 1
+        } || true
+
+        # Stage everything BEFORE gating: `git commit` mid-merge takes the index,
+        # not the working tree, so an unstaged fix silently ships a broken commit.
+        git add -A
+      - task: check
+      - |
+        set -euo pipefail
+        # The gate reformats; re-stage so the commit matches what was tested.
+        git add -A
+        git commit --no-edit
+        echo "merged: $(git log --oneline -1)"
