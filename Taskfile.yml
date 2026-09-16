@@ -32,7 +32,7 @@ tasks:
 
         git remote get-url upstream >/dev/null 2>&1 \
           || git remote add upstream {{.UPSTREAM_URL}}
-        git fetch upstream --tags
+        git fetch upstream --tags --force   # upstream re-points a moving `latest` tag each release
 
         # master carries the release version bump, develop carries more code and
         # a stale version string. See FORK-SYNC.md before changing REF.
