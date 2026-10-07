@@ -2,6 +2,7 @@
 
 use crate::core::config;
 use crate::core::runner;
+use crate::core::shell::display_args;
 use crate::core::truncate::CAP_WARNINGS;
 use crate::core::utils::{resolved_command, strip_ansi, tool_exists, truncate};
 use anyhow::Result;
@@ -57,7 +58,7 @@ pub fn run(args: &[String], verbose: u8) -> Result<i32> {
     runner::run_filtered_with_exit(
         cmd,
         "pytest",
-        &args.join(" "),
+        &display_args(args),
         |raw, exit_code| {
             let clean = strip_ansi(raw);
             let filtered = filter_pytest_output(&clean);
@@ -177,6 +178,7 @@ struct PytestCounts {
     skipped: usize,
     xfailed: usize,
     xpassed: usize,
+    duration: Option<String>,
 }
 
 fn build_pytest_summary(
@@ -192,6 +194,7 @@ fn build_pytest_summary(
         skipped,
         xfailed,
         xpassed,
+        duration,
     } = counts;
 
     if passed == 0 && failed == 0 && skipped == 0 && xfailed == 0 && xpassed == 0 {
@@ -199,9 +202,13 @@ fn build_pytest_summary(
     }
 
     let extras_present = skipped > 0 || xfailed > 0 || xpassed > 0 || !xfail_lines.is_empty();
+    let duration_suffix = duration
+        .as_deref()
+        .map(|value| format!(" in {value}"))
+        .unwrap_or_default();
 
     if failed == 0 && passed > 0 && !extras_present {
-        return format!("Pytest: {} passed", passed);
+        return format!("Pytest: {passed} passed{duration_suffix}");
     }
 
     let mut result = String::new();
@@ -215,6 +222,7 @@ fn build_pytest_summary(
     if xpassed > 0 {
         result.push_str(&format!(", {} xpassed", xpassed));
     }
+    result.push_str(&duration_suffix);
     result.push('\n');
 
     // Surface xfail/xpass entries (with their reasons) — XPASS in particular
@@ -302,7 +310,10 @@ fn build_pytest_summary(
 }
 
 fn parse_summary_line(summary: &str) -> PytestCounts {
-    let mut counts = PytestCounts::default();
+    let mut counts = PytestCounts {
+        duration: parse_duration(summary),
+        ..PytestCounts::default()
+    };
 
     // Parse lines like "=== 4 passed, 1 failed, 2 xfailed, 1 xpassed in 0.50s ==="
     for part in summary.split(',') {
@@ -332,6 +343,15 @@ fn parse_summary_line(summary: &str) -> PytestCounts {
     counts
 }
 
+fn parse_duration(summary: &str) -> Option<String> {
+    let unwrapped = summary.trim().trim_matches('=').trim();
+    let (_, duration_tail) = unwrapped.rsplit_once(" in ")?;
+    let duration = duration_tail.split_whitespace().next()?;
+    let seconds = duration.strip_suffix('s')?;
+    seconds.parse::<f64>().ok()?;
+    Some(duration.to_string())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -349,6 +369,7 @@ tests/test_foo.py .....                                            [100%]
         let result = filter_pytest_output(output);
         assert!(result.contains("Pytest"));
         assert!(result.contains("5 passed"));
+        assert_eq!(result, "Pytest: 5 passed in 0.50s");
     }
 
     #[test]
@@ -373,6 +394,7 @@ FAILED tests/test_foo.py::test_something - assert False
 
         let result = filter_pytest_output(output);
         assert!(result.contains("4 passed, 1 failed"));
+        assert!(result.starts_with("Pytest: 4 passed, 1 failed in 0.50s"));
         assert!(result.contains("test_something"));
         assert!(result.contains("assert False"));
     }
@@ -419,15 +441,69 @@ collected 0 items
     fn test_parse_summary_line() {
         let c = parse_summary_line("=== 5 passed in 0.50s ===");
         assert_eq!((c.passed, c.failed, c.skipped), (5, 0, 0));
+        assert_eq!(c.duration.as_deref(), Some("0.50s"));
 
         let c = parse_summary_line("=== 4 passed, 1 failed in 0.50s ===");
         assert_eq!((c.passed, c.failed, c.skipped), (4, 1, 0));
+        assert_eq!(c.duration.as_deref(), Some("0.50s"));
 
         let c = parse_summary_line("=== 3 passed, 1 failed, 2 skipped in 1.0s ===");
         assert_eq!((c.passed, c.failed, c.skipped), (3, 1, 2));
+        assert_eq!(c.duration.as_deref(), Some("1.0s"));
 
         let c = parse_summary_line("=== 2 passed, 1 failed, 2 xfailed, 1 xpassed in 1.0s ===");
         assert_eq!((c.passed, c.failed, c.xfailed, c.xpassed), (2, 1, 2, 1));
+        assert_eq!(c.duration.as_deref(), Some("1.0s"));
+    }
+
+    #[test]
+    fn test_filter_pytest_quiet_mode_preserves_duration() {
+        let output = "2 passed in 3.04s";
+
+        assert_eq!(filter_pytest_output(output), "Pytest: 2 passed in 3.04s");
+    }
+
+    #[test]
+    fn test_filter_pytest_long_run_preserves_seconds_duration() {
+        let output = "2 passed in 65.12s (0:01:05)";
+
+        assert_eq!(filter_pytest_output(output), "Pytest: 2 passed in 65.12s");
+    }
+
+    #[test]
+    fn test_parse_duration_rejects_tails_that_are_not_seconds() {
+        assert_eq!(
+            parse_duration("=== 2 passed in 0.50s ===").as_deref(),
+            Some("0.50s")
+        );
+        assert_eq!(
+            parse_duration("2 passed in 65.12s (0:01:05)").as_deref(),
+            Some("65.12s")
+        );
+        assert_eq!(parse_duration("=== 2 passed ==="), None);
+        assert_eq!(parse_duration("2 passed in seconds"), None);
+        assert_eq!(parse_duration("2 passed in 0.50"), None);
+    }
+
+    #[test]
+    fn test_filter_pytest_duration_on_every_summary_shape() {
+        // Wrapped long-run form with a warnings part before the duration.
+        let output = "=== 5 passed, 2 warnings in 65.12s (0:01:05) ===";
+        assert_eq!(filter_pytest_output(output), "Pytest: 5 passed in 65.12s");
+
+        // Only-skipped run takes the multi-line emit path.
+        let output = "=== 3 skipped in 0.10s ===";
+        assert_eq!(
+            filter_pytest_output(output),
+            "Pytest: 0 passed, 0 failed, 3 skipped in 0.10s"
+        );
+
+        // Quiet-mode failures line keeps its duration on the multi-line path too.
+        let output = "5 failed, 1698 passed, 2 skipped in 108.89s";
+        assert_eq!(
+            filter_pytest_output(output),
+            "Pytest: 1698 passed, 5 failed, 2 skipped in 108.89s"
+        );
     }
 
     #[test]

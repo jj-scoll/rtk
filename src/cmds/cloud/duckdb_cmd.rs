@@ -6,6 +6,7 @@
 //! tab-separated rows, leaving non-table output (errors, `-csv`, `-line`) alone.
 
 use crate::core::runner::{self, RunOptions};
+use crate::core::shell::display_args;
 use crate::core::truncate::CAP_LIST;
 use crate::core::utils::{resolved_command, strip_ansi};
 use anyhow::Result;
@@ -23,7 +24,7 @@ pub fn run(args: &[String], verbose: u8) -> Result<i32> {
     runner::run_filtered(
         cmd,
         "duckdb",
-        &args.join(" "),
+        &display_args(args),
         filter_duckdb_output,
         RunOptions::stdout_only()
             .tee("duckdb")
