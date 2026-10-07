@@ -800,7 +800,7 @@ pub(crate) fn rewrite_command_precompiled(
     // a continuation; the space-join below would erase them (#3188 review).
     if cmd.contains('\\') {
         let joined = BASH_JOIN_RE.replace_all(cmd, "");
-        if has_heredoc(&joined) || joined.contains("$((") {
+        if joined != cmd && (has_heredoc(&joined) || joined.contains("$((")) {
             return None;
         }
     }
@@ -815,7 +815,13 @@ pub(crate) fn rewrite_command_precompiled(
         return None;
     }
 
-    if has_heredoc(trimmed) || trimmed.contains("$((") {
+    if has_heredoc(trimmed) {
+        // Heredoc lines stay byte-for-byte; only the commands after the last body are rewritten.
+        let (head, tail) = split_after_heredocs(trimmed)?;
+        let rewritten = rewrite_command_precompiled(tail, compiled, normalized_prefixes)?;
+        return Some(format!("{head}{rewritten}"));
+    }
+    if trimmed.contains("$((") {
         return None;
     }
 
@@ -963,6 +969,128 @@ fn classify_line(line: &str) -> LineRole {
         };
     }
     LineRole::Independent
+}
+
+/// What [`scan_heredocs`] found in a command with heredocs.
+struct HeredocScan<'a> {
+    /// Lines outside heredoc bodies: byte offset, text, and the byte ranges of
+    /// the `<<WORD` operators on it.
+    shell_lines: Vec<(usize, &'a str, Vec<std::ops::Range<usize>>)>,
+    /// Byte offset just past the last heredoc body.
+    tail_start: usize,
+    /// An unquoted-delimiter body holds `$(` or a backtick, which bash expands.
+    body_expands: bool,
+}
+
+/// `None` unless `cmd` has heredocs and every one is closed by its exact
+/// delimiter line (`<<-` alone may indent it with tabs). Delimiters other than
+/// a plain word, and here-strings (`<<<` lexes as `<<` then `<`), give `None`.
+fn scan_heredocs(cmd: &str) -> Option<HeredocScan<'_>> {
+    let mut open: Vec<(String, bool, bool)> = Vec::new();
+    let mut shell_lines = Vec::new();
+    let mut tail_start = None;
+    let mut body_expands = false;
+    let mut pos = 0;
+    for line in cmd.split_inclusive('\n') {
+        let start = pos;
+        pos += line.len();
+        let text = line.trim_end_matches(['\n', '\r']);
+        if let Some((delim, strip_tabs, quoted)) = open.first() {
+            let body_line = if *strip_tabs {
+                text.trim_start_matches('\t')
+            } else {
+                text
+            };
+            if body_line == delim {
+                open.remove(0);
+                if open.is_empty() {
+                    tail_start = Some(pos);
+                }
+            } else if !quoted && (text.contains("$(") || text.contains('`')) {
+                body_expands = true;
+            }
+            continue;
+        }
+        let tokens = tokenize(text);
+        let mut ops = Vec::new();
+        for (i, tok) in tokens.iter().enumerate() {
+            if tok.kind != TokenKind::Redirect || !tok.value.ends_with("<<") {
+                continue;
+            }
+            let word_tok = tokens.get(i + 1).filter(|t| t.kind == TokenKind::Arg)?;
+            let (strip_tabs, word) = match word_tok.value.strip_prefix('-') {
+                Some(rest) => (true, rest),
+                None => (false, word_tok.value.as_str()),
+            };
+            let delim = word.trim_matches(['\'', '"']);
+            if delim.is_empty()
+                || !delim
+                    .bytes()
+                    .all(|b| b.is_ascii_alphanumeric() || b == b'_')
+            {
+                return None;
+            }
+            open.push((delim.to_string(), strip_tabs, delim.len() != word.len()));
+            ops.push(tok.offset..word_tok.offset + word_tok.value.len());
+        }
+        shell_lines.push((start, text, ops));
+    }
+    let tail_start = tail_start.filter(|_| open.is_empty())?;
+    Some(HeredocScan {
+        shell_lines,
+        tail_start,
+        body_expands,
+    })
+}
+
+/// Splits `cmd` into `(head, tail)` right after its last heredoc body, so the
+/// caller can keep `head` byte-for-byte and rewrite only `tail`.
+///
+/// `None` unless [`scan_heredocs`] parses `cmd` and every shell line in `head`
+/// is a complete, independent command. Otherwise the tail could still be a
+/// pipe's consumer (`cat <<EOF |`), or inside an open `$(`, quote, or block.
+fn split_after_heredocs(cmd: &str) -> Option<(&str, &str)> {
+    let scan = scan_heredocs(cmd)?;
+    let head_lines: Vec<&str> = scan
+        .shell_lines
+        .iter()
+        .filter(|(start, _, _)| *start < scan.tail_start)
+        .map(|&(_, text, _)| text)
+        .collect();
+    let closed = quotes_balanced(&head_lines.join("\n"))
+        && head_lines.iter().all(|line| {
+            matches!(
+                classify_line(line.trim()),
+                LineRole::Independent | LineRole::Passive
+            )
+        });
+    closed.then(|| cmd.split_at(scan.tail_start))
+}
+
+/// `cmd` as the hook's attestation gate should read it: a heredoc's body and
+/// `<<WORD` operand are neither shell code nor a file target (#3980), so both
+/// are dropped. `None` when the quote-aware lexer sees no heredoc in `cmd`,
+/// one doesn't parse, a body is unquoted and holds a substitution bash would
+/// run, or the lines left don't balance their quotes (a `<<` inside a
+/// multi-line string fooled the line scan); the gate then reads `cmd` itself.
+pub(crate) fn heredoc_free_view(cmd: &str) -> Option<String> {
+    if !has_heredoc(cmd) {
+        return None;
+    }
+    let scan = scan_heredocs(cmd).filter(|scan| !scan.body_expands)?;
+    let lines: Vec<String> = scan
+        .shell_lines
+        .iter()
+        .map(|(_, text, ops)| {
+            let mut line = text.to_string();
+            for op in ops.iter().rev() {
+                line.replace_range(op.clone(), " ");
+            }
+            line
+        })
+        .collect();
+    let view = lines.join("\n");
+    quotes_balanced(&view).then_some(view)
 }
 
 /// Rewrite each line of a multi-line block independently (issue #1243).
@@ -2489,6 +2617,87 @@ mod tests {
         fn test_arithmetic_split_by_line_continuation_passes_through() {
             assert_eq!(
                 rewrite_command_no_prefixes("echo $(\\\n(1+2))\ngit status", &[]),
+                None
+            );
+        }
+
+        #[test]
+        fn test_lines_after_heredoc_are_rewritten_body_untouched() {
+            assert_eq!(
+                rewrite_command_no_prefixes(
+                    "cat > t.py <<'EOF'\nimport os\ngrep -n x f\nEOF\ngit status",
+                    &[]
+                ),
+                Some("cat > t.py <<'EOF'\nimport os\ngrep -n x f\nEOF\nrtk git status".into())
+            );
+        }
+
+        #[test]
+        fn test_lines_after_several_heredocs_are_rewritten() {
+            assert_eq!(
+                rewrite_command_no_prefixes(
+                    "cat > a <<A\nx\nA\ncat > b <<\"B\"\ny\nB\ngit status",
+                    &[]
+                ),
+                Some("cat > a <<A\nx\nA\ncat > b <<\"B\"\ny\nB\nrtk git status".into())
+            );
+            assert_eq!(
+                rewrite_command_no_prefixes("cat <<A <<B\na\nA\nb\nB\ngit status", &[]),
+                Some("cat <<A <<B\na\nA\nb\nB\nrtk git status".into())
+            );
+        }
+
+        #[test]
+        fn test_dash_heredoc_ends_at_tab_indented_delimiter() {
+            assert_eq!(
+                rewrite_command_no_prefixes("cat <<-EOF\n\tbody\n\tEOF\ngit status", &[]),
+                Some("cat <<-EOF\n\tbody\n\tEOF\nrtk git status".into())
+            );
+        }
+
+        #[test]
+        fn test_backslash_inside_heredoc_body_is_not_a_continuation() {
+            assert_eq!(
+                rewrite_command_no_prefixes(
+                    "python3 - <<'EOF'\nprint('a\\nb')\nEOF\ngit status",
+                    &[]
+                ),
+                Some("python3 - <<'EOF'\nprint('a\\nb')\nEOF\nrtk git status".into())
+            );
+        }
+
+        #[test]
+        fn test_heredoc_tail_passes_through_when_unsafe() {
+            for cmd in [
+                // Bash ends `<<` only on the exact delimiter: `git status` is still body.
+                "cat <<EOF\nbody\n EOF\ngit status",
+                // Unterminated: everything after `<<EOF` is body.
+                "cat <<EOF\nbody\ngit status",
+                // The line after the body is the pipe's consumer, not its own command.
+                "cat <<EOF |\nbody\nEOF\ngrep foo",
+                // The tail sits inside a still-open `$(`.
+                "x=$(cat <<EOF\nbody\nEOF\n)\ngit status",
+                // Here-string, not a heredoc.
+                "cat <<< hi\ngit status",
+                // A line continuation in the body changes where bash ends it.
+                "cat <<EOF\nbody \\\nEOF\ngit status",
+                // Nothing after the heredoc to rewrite.
+                "cat <<EOF\nx\nEOF\necho done",
+            ] {
+                assert_eq!(rewrite_command_no_prefixes(cmd, &[]), None, "{cmd:?}");
+            }
+        }
+
+        #[test]
+        fn test_heredoc_free_view_drops_bodies_and_operators() {
+            use crate::discover::registry::heredoc_free_view;
+            assert_eq!(
+                heredoc_free_view("cat <<'EOF' | python3 -\nprint(1)\nEOF\ngit status").as_deref(),
+                Some("cat   | python3 -\ngit status")
+            );
+            // `<<` inside a multi-line string is not a heredoc.
+            assert_eq!(
+                heredoc_free_view("echo \"a\ncat <<EOF\nb\"\ngit status $(whoami)\nEOF"),
                 None
             );
         }

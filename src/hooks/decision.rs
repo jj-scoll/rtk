@@ -128,15 +128,19 @@ impl ApprovalOwner {
 ///    gate can check individually, so a rewrite could smuggle an unchecked
 ///    command past an allow rule. `check_command_with_rules` already forces
 ///    such a command to `Ask`; refusing to rewrite it at all is the stronger
-///    guarantee. Heredocs reach the same outcome, though most of them stop at
-///    this gate only because a `<<` operand reads as a file target; what
-///    actually refuses them is `rewrite_command`'s own `has_heredoc`, which
-///    catches the forms this gate lets past (see #3980).
+///    guarantee. A heredoc is gated without its body and `<<WORD` operand,
+///    which are not file targets (#3980; [`heredoc_free_view`]): a real
+///    redirect or substitution elsewhere, or an unquoted body bash would run a
+///    substitution in, still refuses. `rewrite_command` then rewrites only the
+///    lines after the last body.
 /// 3. **Otherwise rewrite if a rule matches**, and auto-allow only on an
-///    explicit `Allow`. Every other verdict — including `Default`, where no
-///    rule matched at all — yields `AskRewrite`. `Default` must never reach
-///    `AllowRewrite`: that would auto-approve every rewritable command on a
-///    machine with no permission rules configured (#1155).
+///    explicit `Allow` for a command with no heredoc. Every other verdict —
+///    including `Default`, where no rule matched at all — yields `AskRewrite`.
+///    `Default` must never reach `AllowRewrite`: that would auto-approve every
+///    rewritable command on a machine with no permission rules configured
+///    (#1155).
+///
+/// [`heredoc_free_view`]: crate::discover::registry::heredoc_free_view
 ///
 /// An identity rewrite (`cmd` was already RTK-prefixed) is reported here as a
 /// normal rewrite. Callers that want it suppressed apply [`suppress_identity`].
@@ -163,12 +167,16 @@ pub(crate) fn decide_with_params(
         return HookDecision::Deny;
     }
 
-    if crate::discover::lexer::contains_unattestable_construct(cmd) {
+    let heredoc_view = crate::discover::registry::heredoc_free_view(cmd);
+    if crate::discover::lexer::contains_unattestable_construct(
+        heredoc_view.as_deref().unwrap_or(cmd),
+    ) {
         return HookDecision::Defer;
     }
 
     match rewrite_command(cmd, excluded, transparent_prefixes) {
-        Some(rewritten) if verdict == PermissionVerdict::Allow => {
+        // Nothing attested a heredoc body, so its command never auto-allows.
+        Some(rewritten) if verdict == PermissionVerdict::Allow && heredoc_view.is_none() => {
             HookDecision::AllowRewrite(rewritten)
         }
         Some(rewritten) => HookDecision::AskRewrite(rewritten),
@@ -431,6 +439,51 @@ mod tests {
             ),
             HookDecision::Defer
         );
+    }
+
+    /// The lines after a heredoc are rewritten, but nothing attested its body,
+    /// so even an explicit allow only asks.
+    #[test]
+    fn lines_after_a_heredoc_rewrite_but_never_auto_allow() {
+        for (cmd, rewritten) in [
+            (
+                "python3 - <<'EOF'\nprint('$(x) > y')\nEOF\ngit status",
+                "python3 - <<'EOF'\nprint('$(x) > y')\nEOF\nrtk git status",
+            ),
+            (
+                "cat <<EOF | python3 -\nprint(1)\nEOF\ngit status",
+                "cat <<EOF | python3 -\nprint(1)\nEOF\nrtk git status",
+            ),
+        ] {
+            for verdict in [PermissionVerdict::Default, PermissionVerdict::Allow] {
+                assert_eq!(
+                    decide_with_params(cmd, verdict, &[], &[]),
+                    HookDecision::AskRewrite(rewritten.to_string()),
+                    "cmd: {cmd:?}, verdict: {verdict:?}"
+                );
+            }
+        }
+    }
+
+    /// Only the heredoc itself stops reading as a file target: a real write, a
+    /// substitution, or an unquoted body bash would expand still defers.
+    #[test]
+    fn heredoc_command_with_an_unattestable_part_defers() {
+        for cmd in [
+            "cat > run.sh <<'EOF'\necho hi\nEOF\ngit status",
+            "cat <<-'EOF' >run.sh\n\techo hi\n\tEOF\ngit status",
+            "cat <<'EOF'\nhi\nEOF\ngit status $(whoami)",
+            "cat <<EOF\n$(whoami)\nEOF\ngit status",
+            "cat <<EOF\n`whoami`\nEOF\ngit status",
+            // `<<EOF` sits inside a string, so `git status $(whoami)` is a real command.
+            "echo \"a\ncat <<EOF\nb\"\ngit status $(whoami)\nEOF\ngit log",
+        ] {
+            assert_eq!(
+                decide_with_params(cmd, PermissionVerdict::Default, &[], &[]),
+                HookDecision::Defer,
+                "cmd: {cmd:?}"
+            );
+        }
     }
 
     /// `decide` itself reports a no-op rewrite as a normal one; only
