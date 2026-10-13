@@ -20,6 +20,26 @@ tasks:
       - cargo clippy --all-targets
       - cargo test --all
 
+  savings:
+    desc: Hook rewrite rate per rtk version from the hook log (SINCE=YYYY-MM-DD)
+    vars:
+      SINCE: '{{.SINCE | default "2026-09-30"}}'
+    cmds:
+      - |
+        python3 - '{{.SINCE}}' <<'EOF'
+        import os, sqlite3, sys
+        db = os.environ.get("RTK_DB_PATH") or os.path.expanduser("~/.local/share/rtk/history.db")
+        c = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
+        rows = c.execute(
+            "select rtk_version, decision != 'defer', raw_cmd like '%<<%' and raw_cmd not like '%<<<%' "
+            "from hook_decisions where timestamp >= ?", (sys.argv[1],)).fetchall()
+        print(f"{'version':10} {'all rewritten':>22} {'heredoc rewritten':>22}")
+        for v in sorted({r[0] for r in rows}):
+            a = [r for r in rows if r[0] == v]; h = [r for r in a if r[2]]
+            pct = lambda xs: f"{sum(x[1] for x in xs)}/{len(xs)} ({100*sum(x[1] for x in xs)/max(len(xs),1):.1f}%)"
+            print(f"{v:10} {pct(a):>22} {pct(h):>22}")
+        EOF
+
   sync:
     desc: Merge upstream into this fork (REF=upstream/develop by default)
     cmds:
