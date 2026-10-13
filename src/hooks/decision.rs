@@ -122,7 +122,8 @@ impl ApprovalOwner {
 /// The gate order is load-bearing:
 ///
 /// 1. **Deny wins outright.** Checked before anything else so a denied command
-///    is never even considered for rewriting.
+///    is never even considered for rewriting. A deny rule matched inside a
+///    shell wrapper's script yields `Defer` instead: no rewrite, no decision.
 /// 2. **Unattestable constructs are refused.** Command substitution and
 ///    file-target redirects can't be decomposed into segments the permission
 ///    gate can check individually, so a rewrite could smuggle an unchecked
@@ -150,7 +151,7 @@ pub(crate) fn decide(cmd: &str, verdict: PermissionVerdict) -> HookDecision {
 }
 
 /// [`decide`] with the rewrite parameters supplied by the caller, mirroring
-/// [`check_command_with_rules`](super::permissions::check_command_with_rules).
+/// [`check_command_with_rules_and_prefixes`](super::permissions::check_command_with_rules_and_prefixes).
 ///
 /// `hook_rewrite_params` reads `config.toml`, which in a test build is the
 /// calling test's own. Taking the parameters lets a test state the
@@ -165,6 +166,10 @@ pub(crate) fn decide_with_params(
 ) -> HookDecision {
     if verdict == PermissionVerdict::Deny {
         return HookDecision::Deny;
+    }
+
+    if verdict == PermissionVerdict::Defer {
+        return HookDecision::Defer;
     }
 
     let heredoc_view = crate::discover::registry::heredoc_free_view(cmd);
@@ -398,6 +403,18 @@ mod tests {
             decide_with_params("htop", PermissionVerdict::Default, &[], &[]),
             HookDecision::Defer
         );
+    }
+
+    #[test]
+    fn defer_verdict_defers_a_rewritable_command() {
+        assert_eq!(
+            decide_with_params("env bash -c 'git push'", PermissionVerdict::Defer, &[], &[]),
+            HookDecision::Defer
+        );
+        assert!(matches!(
+            decide_with_params("env bash -c 'git push'", PermissionVerdict::Ask, &[], &[]),
+            HookDecision::AskRewrite(_)
+        ));
     }
 
     /// Refused whatever the verdict: the permission gate can't decompose these
