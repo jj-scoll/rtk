@@ -203,7 +203,9 @@ pub fn classify_command(cmd: &str) -> Classification {
     // Peel transparent process wrappers (timeout/nice/nohup/time): they change
     // how a command runs, not which one, so discover must count
     // `timeout 900 uv run pytest` as pytest, not as a `timeout 900` command.
+    // A routable wrapper (`uv run`) is a command of its own and stays.
     let cmd_clean = strip_process_wrapper_prefix(cmd_clean)
+        .filter(|_| !is_routable_wrapper(cmd_clean))
         .map(|(_, rest)| rest)
         .unwrap_or(cmd_clean);
 
@@ -1549,12 +1551,20 @@ fn rewrite_line_range(cmd: &str) -> Option<String> {
 /// unfiltered inner command falls through instead of dropping the rewrite.
 const ROUTABLE_WRAPPER_PREFIXES: &[&str] = &["uv run"];
 
+fn is_routable_wrapper(cmd: &str) -> bool {
+    ROUTABLE_WRAPPER_PREFIXES
+        .iter()
+        .any(|prefix| strip_word_prefix(cmd, prefix).is_some())
+}
+
 /// Shell keywords that wrap a command without changing which one runs. They are
 /// not spawnable, so they must never fall through: `rtk exec foo` cannot run.
 const SHELL_KEYWORD_PREFIXES: &[&str] = &["noglob", "command", "builtin", "exec", "nocorrect"];
 
 struct ProcessWrapper {
     name: &'static str,
+    /// A subcommand that must follow `name` for it to wrap (`uv run`)
+    subcommand: Option<&'static str>,
     value_opts: &'static [&'static str],
     flag_opts: &'static [&'static str],
     attached_opts: &'static [&'static str],
@@ -1565,6 +1575,7 @@ struct ProcessWrapper {
 const PROCESS_WRAPPERS: &[ProcessWrapper] = &[
     ProcessWrapper {
         name: "timeout",
+        subcommand: None,
         value_opts: &["-s", "-k", "--signal", "--kill-after"],
         flag_opts: &["--preserve-status", "--foreground", "-v", "--verbose"],
         attached_opts: &["-s", "-k"],
@@ -1573,6 +1584,7 @@ const PROCESS_WRAPPERS: &[ProcessWrapper] = &[
     },
     ProcessWrapper {
         name: "time",
+        subcommand: None,
         value_opts: &["-f", "-o", "--format", "--output"],
         flag_opts: &[
             "-p",
@@ -1589,6 +1601,7 @@ const PROCESS_WRAPPERS: &[ProcessWrapper] = &[
     },
     ProcessWrapper {
         name: "nice",
+        subcommand: None,
         value_opts: &["-n", "--adjustment"],
         flag_opts: &[],
         attached_opts: &["-n"],
@@ -1597,8 +1610,68 @@ const PROCESS_WRAPPERS: &[ProcessWrapper] = &[
     },
     ProcessWrapper {
         name: "nohup",
+        subcommand: None,
         value_opts: &[],
         flag_opts: &[],
+        attached_opts: &[],
+        positionals: 0,
+        numeric_opts: false,
+    },
+    // `uv run`'s own options (`uv run --help`). `-m`/`--module` is left out on
+    // purpose: the word after it is a Python module, not a command to wrap. An
+    // option missing here falls through to `rtk uv run`, the routable default.
+    ProcessWrapper {
+        name: "uv",
+        subcommand: Some("run"),
+        value_opts: &[
+            "--extra",
+            "--group",
+            "--only-group",
+            "--no-group",
+            "--with",
+            "--with-editable",
+            "--with-requirements",
+            "--env-file",
+            "--package",
+            "--python",
+            "-p",
+            "--project",
+            "--directory",
+            "--index",
+            "--default-index",
+            "--index-url",
+            "--extra-index-url",
+            "--color",
+            "--cache-dir",
+            "--config-file",
+        ],
+        flag_opts: &[
+            "-q",
+            "--quiet",
+            "-v",
+            "--verbose",
+            "--all-extras",
+            "--all-groups",
+            "--no-default-groups",
+            "--dev",
+            "--no-dev",
+            "--only-dev",
+            "--frozen",
+            "--locked",
+            "--no-sync",
+            "--isolated",
+            "--active",
+            "--no-project",
+            "--no-cache",
+            "--offline",
+            "--no-config",
+            "--no-progress",
+            "--native-tls",
+            "--no-env-file",
+            "--no-editable",
+            "--exact",
+            "--all-packages",
+        ],
         attached_opts: &[],
         positionals: 0,
         numeric_opts: false,
@@ -1963,7 +2036,7 @@ fn rewrite_segment_inner(
 
     // #2375
     if let Some((prefix, rest)) = strip_process_wrapper_prefix(trimmed) {
-        return rewrite_segment_inner(
+        let rewritten = rewrite_segment_inner(
             rest,
             excluded,
             transparent_prefixes,
@@ -1972,6 +2045,15 @@ fn rewrite_segment_inner(
             shell_wrapper_depth,
         )
         .map(|rewritten| format!("{} {}", prefix, rewritten));
+        // A routable wrapper (`uv run --quiet python x.py`) falls through to its
+        // own filter when the inner command has none -- unless the inner command
+        // was excluded, which re-testing the wrapped form would defeat (#2768).
+        if rewritten.is_some()
+            || !is_routable_wrapper(trimmed)
+            || is_excluded(ENV_PREFIX.replace(rest, "").trim(), excluded)
+        {
+            return rewritten;
+        }
     }
 
     // User-configured wrapper prefixes (e.g. `docker exec mycontainer`). These
@@ -2210,9 +2292,12 @@ fn strip_process_wrapper_prefix(cmd: &str) -> Option<(&str, &str)> {
     if first.kind != TokenKind::Arg {
         return None;
     }
-    let wrapper = PROCESS_WRAPPERS
-        .iter()
-        .find(|candidate| candidate.name == command_basename(&first.value))?;
+    let wrapper = PROCESS_WRAPPERS.iter().find(|candidate| {
+        candidate.name == command_basename(&first.value)
+            && candidate
+                .subcommand
+                .is_none_or(|sub| arg_token(&tokens, 1).is_some_and(|t| t.value == sub))
+    })?;
     let inner = wrapper_inner_command(wrapper, &tokens)?;
     if tokens[..inner_index(&tokens, inner)]
         .iter()
@@ -2243,7 +2328,7 @@ fn wrapper_inner_command<'a>(
     wrapper: &ProcessWrapper,
     tokens: &'a [ParsedToken],
 ) -> Option<&'a ParsedToken> {
-    let mut idx = 1;
+    let mut idx = 1 + usize::from(wrapper.subcommand.is_some());
     let mut options_done = false;
     let mut positionals = wrapper.positionals;
 
@@ -5739,6 +5824,50 @@ mod tests {
         assert_eq!(
             rewrite_command_no_prefixes("uv run pytest tests/", &[]),
             Some("uv run rtk pytest tests/".into())
+        );
+    }
+
+    #[test]
+    fn test_rewrite_uv_run_with_its_own_options() {
+        assert_eq!(
+            rewrite_command_no_prefixes(
+                "uv run --quiet --all-extras --group lambda-portal pytest tests -q",
+                &[]
+            ),
+            Some("uv run --quiet --all-extras --group lambda-portal rtk pytest tests -q".into())
+        );
+        assert_eq!(
+            rewrite_command_no_prefixes("uv run --group=dev --frozen ruff check .", &[]),
+            Some("uv run --group=dev --frozen rtk ruff check .".into())
+        );
+    }
+
+    #[test]
+    fn test_rewrite_uv_run_options_with_user_uv_run_prefix() {
+        let prefixes = vec!["uv run".to_string()];
+        assert_eq!(
+            rewrite_command(
+                "uv run --quiet --group lambda-portal pytest tests",
+                &[],
+                &prefixes
+            ),
+            Some("uv run --quiet --group lambda-portal rtk pytest tests".into())
+        );
+    }
+
+    #[test]
+    fn test_rewrite_uv_run_options_excluded_inner_is_not_rerouted() {
+        assert_eq!(
+            rewrite_command_no_prefixes("uv run --quiet pytest tests", &["pytest".to_string()]),
+            None
+        );
+    }
+
+    #[test]
+    fn test_rewrite_uv_subcommand_other_than_run_is_not_a_wrapper() {
+        assert_eq!(
+            rewrite_command_no_prefixes("uv pip --quiet pytest", &[]),
+            None
         );
     }
 
