@@ -3,6 +3,7 @@
 //! Replaces verbose `--output table`/`text` with JSON, then compresses.
 //! Specialized filters for high-frequency commands (STS, S3, EC2, ECS, RDS, CloudFormation).
 
+use crate::core::arg_tokenizer::{self, Dialect, TokenKind, ValueSpec};
 use crate::core::guard::never_worse;
 use crate::core::shell::display_args;
 use crate::core::stream::{CaptureResult, exec_capture};
@@ -41,6 +42,56 @@ impl FilterResult {
         Self {
             text,
             truncated: true,
+        }
+    }
+}
+
+/// AWS CLI global options that take a value (`aws help` → GLOBAL OPTIONS).
+fn global_takes_value(kind: TokenKind, name: &str) -> Option<ValueSpec> {
+    (kind == TokenKind::Long
+        && matches!(
+            name,
+            "profile"
+                | "region"
+                | "output"
+                | "query"
+                | "endpoint-url"
+                | "color"
+                | "ca-bundle"
+                | "cli-read-timeout"
+                | "cli-connect-timeout"
+                | "cli-binary-format"
+        ))
+    .then(ValueSpec::value)
+}
+
+/// Splits `aws [global options] <service> <rest>` into the service and its
+/// arguments. The AWS CLI accepts global options anywhere on the line, so the
+/// ones given before the service move behind the operation, where every
+/// handler already passes trailing arguments through. `None` when there is no
+/// service to route on (`--version`, a bare global option, a leading `--`).
+fn split_service(args: &[String]) -> Option<(String, Vec<String>)> {
+    let tokens = arg_tokenizer::tokenize_grammar(args, &global_takes_value, Dialect::Posix);
+    let idx = tokens.iter().find_map(|token| match token.kind {
+        TokenKind::DashDash => Some(None),
+        TokenKind::Positional if token.is_free_positional() => Some(Some(token.source_index)),
+        _ => None,
+    })??;
+    let rest = args[idx + 1..]
+        .iter()
+        .chain(&args[..idx])
+        .cloned()
+        .collect();
+    Some((args[idx].clone(), rest))
+}
+
+/// Run `rtk aws <args>`: route on the service, or pass through when there is none
+pub fn run_args(args: &[String], verbose: u8) -> Result<i32> {
+    match split_service(args) {
+        Some((service, rest)) => run(&service, &rest, verbose),
+        None => {
+            let os_args: Vec<std::ffi::OsString> = args.iter().map(Into::into).collect();
+            crate::core::runner::run_passthrough("aws", &os_args, verbose)
         }
     }
 }
@@ -1533,6 +1584,80 @@ fn filter_secrets_get(json_str: &str) -> Option<FilterResult> {
 mod tests {
     use super::*;
     use crate::core::utils::count_tokens;
+
+    fn to_args(args: &[&str]) -> Vec<String> {
+        args.iter().map(|a| a.to_string()).collect()
+    }
+
+    fn split(args: &[&str]) -> Option<(String, Vec<String>)> {
+        split_service(&to_args(args))
+    }
+
+    #[test]
+    fn global_options_before_the_service_move_behind_the_operation() {
+        assert_eq!(
+            split(&[
+                "--profile",
+                "admin",
+                "--region",
+                "us-east-1",
+                "lambda",
+                "get-function",
+                "--function-name",
+                "f",
+            ]),
+            Some((
+                "lambda".to_string(),
+                to_args(&[
+                    "get-function",
+                    "--function-name",
+                    "f",
+                    "--profile",
+                    "admin",
+                    "--region",
+                    "us-east-1",
+                ])
+            ))
+        );
+    }
+
+    #[test]
+    fn boolean_global_option_does_not_take_the_service_as_its_value() {
+        assert_eq!(
+            split(&["--no-cli-pager", "s3", "ls"]),
+            Some(("s3".to_string(), to_args(&["ls", "--no-cli-pager"])))
+        );
+    }
+
+    #[test]
+    fn attached_global_option_value_stays_attached() {
+        assert_eq!(
+            split(&["--profile=admin", "sts", "get-caller-identity"]),
+            Some((
+                "sts".to_string(),
+                to_args(&["get-caller-identity", "--profile=admin"])
+            ))
+        );
+    }
+
+    #[test]
+    fn service_first_is_unchanged() {
+        assert_eq!(
+            split(&["sts", "get-caller-identity", "--profile", "admin"]),
+            Some((
+                "sts".to_string(),
+                to_args(&["get-caller-identity", "--profile", "admin"])
+            ))
+        );
+    }
+
+    #[test]
+    fn no_service_means_no_split() {
+        assert_eq!(split(&[]), None);
+        assert_eq!(split(&["--version"]), None);
+        assert_eq!(split(&["--profile", "admin"]), None);
+        assert_eq!(split(&["--", "sts"]), None);
+    }
 
     #[test]
     fn test_snapshot_sts_identity() {

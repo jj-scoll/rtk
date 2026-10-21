@@ -296,9 +296,7 @@ enum Commands {
 
     /// AWS CLI with compact output (force JSON, compress)
     Aws {
-        /// AWS service subcommand (e.g., sts, s3, ec2, ecs, rds, cloudformation)
-        subcommand: String,
-        /// Additional arguments
+        /// AWS CLI arguments: [global options] <service> <operation> [args]
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
         args: Vec<String>,
     },
@@ -2647,7 +2645,7 @@ fn run_cli() -> Result<i32> {
             cli.verbose,
         )?,
 
-        Commands::Aws { subcommand, args } => aws_cmd::run(&subcommand, &args, cli.verbose)?,
+        Commands::Aws { args } => aws_cmd::run_args(&args, cli.verbose)?,
 
         Commands::Psql { args } => psql_cmd::run(&args, cli.verbose)?,
         Commands::Duckdb { args } => duckdb_cmd::run(&args, cli.verbose)?,
@@ -3990,6 +3988,28 @@ mod tests {
         );
         assert_eq!(proxy_label("echo", &[]), "echo");
         assert_eq!(proxy_label("FOO=1", &["x".to_string()]), "'FOO=1' x");
+    }
+
+    #[test]
+    fn test_aws_accepts_global_options_before_the_service() {
+        let cli = Cli::try_parse_from([
+            "rtk",
+            "aws",
+            "--profile",
+            "admin",
+            "sts",
+            "get-caller-identity",
+        ])
+        .expect("a global option before the service must parse");
+        match cli.command {
+            Commands::Aws { args } => {
+                assert_eq!(
+                    args,
+                    vec!["--profile", "admin", "sts", "get-caller-identity"]
+                );
+            }
+            _ => panic!("Expected Aws command"),
+        }
     }
 
     #[test]
