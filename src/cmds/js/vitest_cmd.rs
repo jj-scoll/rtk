@@ -34,6 +34,12 @@ struct VitestTestFile {
     name: String,
     #[serde(rename = "assertionResults")]
     assertion_results: Vec<VitestTest>,
+    /// "failed" also when the file itself errored (failed import, hook error)
+    #[serde(default)]
+    status: String,
+    /// The file-level error, empty when only its tests failed
+    #[serde(default)]
+    message: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -65,11 +71,16 @@ impl OutputParser for VitestParser {
         match json_result {
             Ok(json) => {
                 let failures = extract_failures_from_json(&json);
+                let file_errors = json
+                    .test_results
+                    .iter()
+                    .filter(|file| is_file_error(file))
+                    .count();
 
                 let result = TestResult {
                     total: json.num_total_tests,
                     passed: json.num_passed_tests,
-                    failed: json.num_failed_tests,
+                    failed: json.num_failed_tests + file_errors,
                     skipped: json.num_pending_tests,
                     duration_ms: None,
                     failures,
@@ -98,6 +109,14 @@ fn extract_failures_from_json(json: &VitestJsonOutput) -> Vec<TestFailure> {
     let mut failures = Vec::new();
 
     for file in &json.test_results {
+        if is_file_error(file) {
+            failures.push(TestFailure {
+                test_name: file.name.clone(),
+                file_path: file.name.clone(),
+                error_message: file.message.clone(),
+                stack_trace: None,
+            });
+        }
         for test in &file.assertion_results {
             if test.status == "failed" {
                 let error_message = test.failure_messages.join("\n");
@@ -112,6 +131,11 @@ fn extract_failures_from_json(json: &VitestJsonOutput) -> Vec<TestFailure> {
     }
 
     failures
+}
+
+/// A file that errored on its own, so no test result records why it failed
+fn is_file_error(file: &VitestTestFile) -> bool {
+    file.status == "failed" && !file.message.is_empty()
 }
 
 /// Tier 2: Extract test statistics using regex (degraded mode)
@@ -269,11 +293,11 @@ fn run_framework_test(invocation: TestInvocation, verbose: u8) -> Result<i32> {
     cmd.args(&invocation.args);
 
     let result = exec_capture(&mut cmd).context(format!("Failed to run {}", framework))?;
-    let combined = result.combined();
+    let (stdout, combined) = with_written_report(&result.stdout, result.combined());
 
     let filtered = format_test_output(
         framework,
-        &result.stdout,
+        &stdout,
         &combined,
         invocation.passthrough,
         verbose,
@@ -326,6 +350,29 @@ fn should_skip_vitest_arg(arg: &str) -> bool {
     arg == "run" || arg.starts_with("--json") || arg.starts_with("--watch")
 }
 
+/// vitest 5's JSON reporter writes to a file (`.vitest/json/output.json` or the
+/// configured `outputFile`) and prints only where; read the report from there.
+fn read_written_report(stdout: &str) -> Option<String> {
+    static WRITTEN_RE: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"(?m)^JSON report written to (.+?)\s*$").unwrap());
+    let stdout = strip_ansi(stdout);
+    let path = WRITTEN_RE.captures(&stdout)?.get(1)?.as_str().to_string();
+    std::fs::read_to_string(path).ok()
+}
+
+/// stdout and combined output as the parser and the size guard should weigh
+/// them: a written report stands in for the line that points at it, since that
+/// line alone tells the reader nothing.
+fn with_written_report(stdout: &str, combined: String) -> (String, String) {
+    match read_written_report(stdout) {
+        Some(report) => {
+            let combined = format!("{combined}\n{report}");
+            (report, combined)
+        }
+        None => (stdout.to_string(), combined),
+    }
+}
+
 fn format_test_output(
     framework: &str,
     stdout: &str,
@@ -354,7 +401,7 @@ fn format_test_output(
         }
         ParseResult::Passthrough(_) => {
             emit_passthrough_warning(framework, "All parsing tiers failed");
-            format_passthrough_output(stdout)
+            format_passthrough_output(combined)
         }
     }
 }
@@ -501,6 +548,64 @@ mod tests {
         let result = VitestParser::parse(invalid);
         assert_eq!(result.tier(), 3); // Passthrough
         assert!(!result.is_ok());
+    }
+
+    // A file that fails to load (bad import, syntax error) carries its error on
+    // the file entry: no assertion results, and numFailedTests stays 0.
+    const SUITE_LOAD_ERROR_JSON: &str = r#"{"numTotalTestSuites":1,"numFailedTestSuites":1,"numTotalTests":0,"numPassedTests":0,"numFailedTests":0,"numPendingTests":0,"success":false,"testResults":[{"assertionResults":[],"status":"failed","message":"Cannot find package '@src/test/render' imported from /repo/src/Page.test.tsx","name":"/repo/src/Page.test.tsx"}]}"#;
+
+    #[test]
+    fn test_vitest_parser_reports_suite_load_error() {
+        let result = VitestParser::parse(SUITE_LOAD_ERROR_JSON);
+        assert_eq!(result.tier(), 1);
+
+        let data = result.unwrap();
+        assert_eq!(data.failed, 1);
+        assert_eq!(data.failures.len(), 1);
+        assert_eq!(data.failures[0].test_name, "/repo/src/Page.test.tsx");
+        assert!(
+            data.failures[0]
+                .error_message
+                .contains("Cannot find package '@src/test/render'")
+        );
+    }
+
+    // vitest 5 writes the JSON report to a file unless the reporter is told to
+    // use stdout, and prints only where it went.
+    #[test]
+    fn test_vitest5_written_report_is_read() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let report = dir.path().join("output.json");
+        std::fs::write(&report, SUITE_LOAD_ERROR_JSON).expect("write report");
+        let line = format!("JSON report written to {}\n", report.display());
+
+        let (stdout, combined) = with_written_report(&line, line.clone());
+        let filtered = format_test_output("vitest", &stdout, &combined, false, 0);
+
+        assert!(filtered.text.contains("FAIL (1)"), "{}", filtered.text);
+        assert!(filtered.text.contains("Cannot find package"));
+        // The size guard weighs the filtered output against `combined`, which
+        // must include the report, or the bare pointer line wins.
+        assert!(filtered.text.len() < combined.len());
+    }
+
+    #[test]
+    fn test_vitest_written_report_missing_file_is_ignored() {
+        assert_eq!(
+            read_written_report("JSON report written to /nonexistent/rtk/output.json\n"),
+            None
+        );
+        assert_eq!(read_written_report("no report line here"), None);
+    }
+
+    #[test]
+    fn test_vitest_unparseable_output_passes_stderr_through() {
+        let stdout = "random output with no structure\n";
+        let combined = "random output with no structure\nError: config failed to load\n";
+
+        let filtered = format_test_output("vitest", stdout, combined, false, 0);
+
+        assert!(filtered.text.contains("config failed to load"));
     }
 
     #[test]
