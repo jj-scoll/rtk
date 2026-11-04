@@ -1579,6 +1579,14 @@ struct ProcessWrapper {
     attached_opts: &'static [&'static str],
     positionals: usize,
     numeric_opts: bool,
+    /// Options that end the wrapper's own arguments and start the wrapped
+    /// command (`nix develop -c go test`). Empty for wrappers whose command is
+    /// the first word that is not an option. When set, every other bare word
+    /// before the option is the wrapper's own (flakeref, installables) and is
+    /// skipped, and a wrapper line without the option wraps nothing.
+    command_opts: &'static [&'static str],
+    /// Options that take two values (`--override-input NAME URL`).
+    pair_opts: &'static [&'static str],
 }
 
 const PROCESS_WRAPPERS: &[ProcessWrapper] = &[
@@ -1590,6 +1598,8 @@ const PROCESS_WRAPPERS: &[ProcessWrapper] = &[
         attached_opts: &["-s", "-k"],
         positionals: 1,
         numeric_opts: false,
+        command_opts: &[],
+        pair_opts: &[],
     },
     ProcessWrapper {
         name: "time",
@@ -1607,6 +1617,8 @@ const PROCESS_WRAPPERS: &[ProcessWrapper] = &[
         attached_opts: &["-f", "-o"],
         positionals: 0,
         numeric_opts: false,
+        command_opts: &[],
+        pair_opts: &[],
     },
     ProcessWrapper {
         name: "nice",
@@ -1616,6 +1628,8 @@ const PROCESS_WRAPPERS: &[ProcessWrapper] = &[
         attached_opts: &["-n"],
         positionals: 0,
         numeric_opts: true,
+        command_opts: &[],
+        pair_opts: &[],
     },
     ProcessWrapper {
         name: "nohup",
@@ -1625,6 +1639,8 @@ const PROCESS_WRAPPERS: &[ProcessWrapper] = &[
         attached_opts: &[],
         positionals: 0,
         numeric_opts: false,
+        command_opts: &[],
+        pair_opts: &[],
     },
     // `uv run`'s own options (`uv run --help`). `-m`/`--module` is left out on
     // purpose: the word after it is a Python module, not a command to wrap. An
@@ -1684,6 +1700,142 @@ const PROCESS_WRAPPERS: &[ProcessWrapper] = &[
         attached_opts: &[],
         positionals: 0,
         numeric_opts: false,
+        command_opts: &[],
+        pair_opts: &[],
+    },
+    // `nix develop` and `nix shell`, from `nix develop --help` and `nix shell
+    // --help` (nix 2.34.9). `-i`/`--ignore-env` is left out on purpose: it
+    // empties PATH, so `rtk` would not resolve inside the shell, and an option
+    // missing here leaves the line untouched. `nix run` and `nix-shell --run`
+    // are not wrappers: the first names its program as an installable, the
+    // second takes a shell string.
+    ProcessWrapper {
+        name: "nix",
+        subcommand: Some("develop"),
+        value_opts: &[
+            "--file",
+            "-f",
+            "--expr",
+            "--include",
+            "-I",
+            "--inputs-from",
+            "--output-lock-file",
+            "--reference-lock-file",
+            "--update-input",
+            "--eval-store",
+            "--arg-from-stdin",
+            "--keep-env-var",
+            "-k",
+            "--unset-env-var",
+            "-u",
+            "--log-format",
+            "--max-jobs",
+            "--extra-experimental-features",
+            "--substituters",
+            "--phase",
+            "--profile",
+        ],
+        flag_opts: &[
+            "--impure",
+            "--print-build-logs",
+            "-L",
+            "--verbose",
+            "-v",
+            "--quiet",
+            "--debug",
+            "--debugger",
+            "--offline",
+            "--refresh",
+            "--repair",
+            "--no-registries",
+            "--no-update-lock-file",
+            "--no-write-lock-file",
+            "--recreate-lock-file",
+            "--commit-lock-file",
+            "--accept-flake-config",
+            "--no-warn-dirty",
+            "--build",
+            "--check",
+            "--configure",
+            "--install",
+            "--installcheck",
+            "--unpack",
+        ],
+        attached_opts: &[],
+        positionals: 0,
+        numeric_opts: false,
+        command_opts: &["-c", "--command"],
+        pair_opts: &[
+            "--arg",
+            "--argstr",
+            "--arg-from-file",
+            "--override-input",
+            "--override-flake",
+            "--set-env-var",
+            "-s",
+            "--option",
+            "--redirect",
+        ],
+    },
+    ProcessWrapper {
+        name: "nix",
+        subcommand: Some("shell"),
+        value_opts: &[
+            "--file",
+            "-f",
+            "--expr",
+            "--include",
+            "-I",
+            "--inputs-from",
+            "--output-lock-file",
+            "--reference-lock-file",
+            "--update-input",
+            "--eval-store",
+            "--arg-from-stdin",
+            "--keep-env-var",
+            "-k",
+            "--unset-env-var",
+            "-u",
+            "--log-format",
+            "--max-jobs",
+            "--extra-experimental-features",
+            "--substituters",
+        ],
+        flag_opts: &[
+            "--impure",
+            "--print-build-logs",
+            "-L",
+            "--verbose",
+            "-v",
+            "--quiet",
+            "--debug",
+            "--debugger",
+            "--offline",
+            "--refresh",
+            "--repair",
+            "--no-registries",
+            "--no-update-lock-file",
+            "--no-write-lock-file",
+            "--recreate-lock-file",
+            "--commit-lock-file",
+            "--accept-flake-config",
+            "--no-warn-dirty",
+            "--stdin",
+        ],
+        attached_opts: &[],
+        positionals: 0,
+        numeric_opts: false,
+        command_opts: &["-c", "--command"],
+        pair_opts: &[
+            "--arg",
+            "--argstr",
+            "--arg-from-file",
+            "--override-input",
+            "--override-flake",
+            "--set-env-var",
+            "-s",
+            "--option",
+        ],
     },
 ];
 
@@ -1704,6 +1856,8 @@ const MATCH_ONLY_WRAPPERS: &[ProcessWrapper] = &[
         attached_opts: &["-i", "-o", "-e"],
         positionals: 0,
         numeric_opts: false,
+        command_opts: &[],
+        pair_opts: &[],
     },
     ProcessWrapper {
         name: "xargs",
@@ -1713,6 +1867,8 @@ const MATCH_ONLY_WRAPPERS: &[ProcessWrapper] = &[
         attached_opts: &[],
         positionals: 0,
         numeric_opts: false,
+        command_opts: &[],
+        pair_opts: &[],
     },
 ];
 
@@ -2373,9 +2529,10 @@ fn strip_wrapper_prefix_from_any<'a>(
 /// the rewrite already applies — its env peel, its keyword prefixes, its
 /// wrapper table — so where both look through a prefix they read the same
 /// command behind it, plus the two wrappers RTK looks through without
-/// rewriting through. The rewrite also looks through `uv run` and a user's
+/// rewriting through. The rewrite also looks through a user's
 /// `transparent_prefixes`, which the host does not strip and neither does
-/// this.
+/// this. `uv run` and `nix develop|shell -c` are in the wrapper table, so they
+/// are peeled here too, which can only make a verdict stricter.
 ///
 /// The line is drawn at the shell: anything that only runs the next word as
 /// the command is peeled, which also takes in `env`, `exec` and `nocorrect`
@@ -2486,7 +2643,17 @@ fn wrapper_inner_command<'a>(
         let token = arg_token(tokens, idx)?;
         let arg = token.value.as_str();
 
+        // The command starts after this option, and everything after it is the
+        // wrapped command's, `--` included.
+        if !options_done && wrapper.command_opts.contains(&arg) {
+            return arg_token(tokens, idx + 1);
+        }
         if !options_done && arg == "--" {
+            // With a command option, `--` ends the wrapper's options before
+            // one appeared: there is no command.
+            if !wrapper.command_opts.is_empty() {
+                return None;
+            }
             options_done = true;
             idx += 1;
             continue;
@@ -2505,10 +2672,17 @@ fn wrapper_inner_command<'a>(
                 idx += 2;
                 continue;
             }
+            if wrapper.pair_opts.contains(&arg) {
+                arg_token(tokens, idx + 1)?;
+                arg_token(tokens, idx + 2)?;
+                idx += 3;
+                continue;
+            }
             return None;
         }
-        if positionals > 0 {
-            positionals -= 1;
+        // Bare words before the command option are the wrapper's own.
+        if positionals > 0 || !wrapper.command_opts.is_empty() {
+            positionals = positionals.saturating_sub(1);
             idx += 1;
             continue;
         }
@@ -6024,6 +6198,166 @@ mod tests {
             rewrite_command_no_prefixes("python -m pytest -x tests/", &[]),
             Some("rtk pytest -x tests/".into())
         );
+    }
+
+    // Settles the doc comment on `matching_readings` against its code: the
+    // wrapper peel uses PROCESS_WRAPPERS, which holds `uv run`.
+    #[test]
+    fn test_matching_readings_peel_uv_run() {
+        let peeled = matching_readings("uv run git push");
+        assert!(
+            peeled.readings.contains(&"git push"),
+            "{:?}",
+            peeled.readings
+        );
+    }
+
+    #[test]
+    fn test_rewrite_nix_develop_and_shell_command() {
+        for (input, expected) in [
+            (
+                "nix develop -c go test ./...",
+                "nix develop -c rtk go test ./...",
+            ),
+            (
+                "nix develop --command go test ./... -count=1",
+                "nix develop --command rtk go test ./... -count=1",
+            ),
+            (
+                "nix develop .#ci --impure -L -c go test -race ./...",
+                "nix develop .#ci --impure -L -c rtk go test -race ./...",
+            ),
+            (
+                "nix develop --override-input nixpkgs github:NixOS/nixpkgs/abc -c go vet ./...",
+                "nix develop --override-input nixpkgs github:NixOS/nixpkgs/abc -c rtk go vet ./...",
+            ),
+            (
+                "nix develop --option sandbox false -c cargo test",
+                "nix develop --option sandbox false -c rtk cargo test",
+            ),
+            (
+                "nix develop --max-jobs 4 --accept-flake-config -c cargo test",
+                "nix develop --max-jobs 4 --accept-flake-config -c rtk cargo test",
+            ),
+            (
+                "nix shell nixpkgs#cargo nixpkgs#rustc -c cargo build --release",
+                "nix shell nixpkgs#cargo nixpkgs#rustc -c rtk cargo build --release",
+            ),
+            (
+                "nix shell nixpkgs#cargo nixpkgs#clippy --command cargo clippy --all-targets",
+                "nix shell nixpkgs#cargo nixpkgs#clippy --command rtk cargo clippy --all-targets",
+            ),
+            (
+                "nix develop -c go test ./... -- -run X",
+                "nix develop -c rtk go test ./... -- -run X",
+            ),
+            (
+                "FOO=1 nix develop -c go test ./...",
+                "FOO=1 nix develop -c rtk go test ./...",
+            ),
+            (
+                "timeout 600 nix develop -c go test ./...",
+                "timeout 600 nix develop -c rtk go test ./...",
+            ),
+            (
+                "/run/current-system/sw/bin/nix develop -c go test ./...",
+                "/run/current-system/sw/bin/nix develop -c rtk go test ./...",
+            ),
+        ] {
+            assert_eq!(
+                rewrite_command_no_prefixes(input, &[]).as_deref(),
+                Some(expected),
+                "{input}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_rewrite_nix_develop_inner_quoted_shell() {
+        let out = rewrite_command_no_prefixes(
+            "nix develop -c sh -c 'go vet ./... && go test ./... -count=1'",
+            &[],
+        )
+        .expect("rewritten");
+        assert!(out.starts_with("nix develop -c sh -c '"), "{out}");
+        assert!(out.contains("rtk go vet"), "{out}");
+        assert!(out.contains("rtk go test"), "{out}");
+    }
+
+    #[test]
+    fn test_rewrite_nix_develop_not_rewritten() {
+        for input in [
+            "nix develop",
+            "nix develop .#ci",
+            "nix develop -c",
+            "nix shell nixpkgs#hello",
+            "nix develop -c some-unfiltered-tool --flag",
+            "nix develop --unknown-flag -c go test",
+            "nix develop -- -c go test",
+            "nix develop --argstr x -c go test",
+            "nix develop --option k -c go test",
+            "nix run nixpkgs#actionlint -- .github/workflows/x.yml",
+            "nix run nixpkgs#go -- test ./...",
+            "nix eval --raw nixpkgs#hello.version",
+            "nix-shell -p go --run 'go test ./...'",
+            "nix-shell --run 'go test ./...'",
+            "nix develop -c rtk go test",
+            // rtk is not on PATH inside an emptied environment
+            "nix develop -i -c go test ./...",
+            "nix develop --ignore-env -c go test ./...",
+            "nix shell nixpkgs#go --ignore-environment -c go test ./...",
+            "nix shell -i nixpkgs#go -c go test ./...",
+        ] {
+            assert_eq!(rewrite_command_no_prefixes(input, &[]), None, "{input}");
+        }
+    }
+
+    #[test]
+    fn test_rewrite_nix_develop_respects_excluded_inner() {
+        assert_eq!(
+            rewrite_command_no_prefixes("nix develop -c go test", &["go".to_string()]),
+            None
+        );
+    }
+
+    #[test]
+    fn test_matching_readings_peel_nix_wrappers() {
+        for (cmd, inner) in [
+            ("nix develop -c git push", "git push"),
+            (
+                "nix shell nixpkgs#git -c git push --force",
+                "git push --force",
+            ),
+            ("nix develop .#ci --impure -c git push", "git push"),
+        ] {
+            let peeled = matching_readings(cmd);
+            assert!(
+                peeled.readings.contains(&inner),
+                "{cmd}: {:?}",
+                peeled.readings
+            );
+        }
+        let peeled = matching_readings("nix develop -c git status");
+        assert_eq!(
+            peeled.readings,
+            vec!["nix develop -c git status", "git status"]
+        );
+    }
+
+    #[test]
+    fn test_nix_develop_shell_wrapper_is_seen_by_the_gate() {
+        let seen = shell_wrapper_positions("nix develop -c bash -c 'git push'", &[])
+            .into_iter()
+            .any(|position| parse_shell_wrapper(position).is_some());
+        assert!(seen);
+    }
+
+    #[test]
+    fn test_classify_nix_develop_sees_inner_command() {
+        match classify_command("nix develop -c go test ./...") {
+            Classification::Supported { .. } => {}
+            other => panic!("expected Supported, got {other:?}"),
+        }
     }
 
     #[test]
