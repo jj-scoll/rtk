@@ -6313,6 +6313,31 @@ mod tests {
     }
 
     #[test]
+    fn test_rewrite_nix_flake_check_and_build() {
+        for (input, expected) in [
+            ("nix flake check", "rtk nix flake check"),
+            (
+                "nix flake check --no-build",
+                "rtk nix flake check --no-build",
+            ),
+            ("nix build .#pkg --no-link", "rtk nix build .#pkg --no-link"),
+        ] {
+            assert_eq!(
+                rewrite_command_no_prefixes(input, &[]).as_deref(),
+                Some(expected),
+                "{input}"
+            );
+        }
+        for input in [
+            "nix eval --raw nixpkgs#hello.version",
+            "nix flake metadata",
+            "nix run nixpkgs#hello",
+        ] {
+            assert_eq!(rewrite_command_no_prefixes(input, &[]), None, "{input}");
+        }
+    }
+
+    #[test]
     fn test_rewrite_nix_develop_respects_excluded_inner() {
         assert_eq!(
             rewrite_command_no_prefixes("nix develop -c go test", &["go".to_string()]),

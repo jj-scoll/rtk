@@ -1,0 +1,93 @@
+[filters.nix]
+description = "Compact nix flake check / nix build output - drop progress lines, keep errors, hashes and store paths"
+match_command = "^nix\\s+(flake\\s+check|build)(\\s|$|[;|&()<>])"
+strip_ansi = true
+filter_stderr = true
+strip_lines_matching = [
+  "^checking (overlay|flake output|NixOS configuration|derivation|app|package)\\b",
+  "^evaluating flake\\.\\.\\.$",
+  "^copying path '/nix/store/",
+  "^building '/nix/store/.*\\.drv'\\.\\.\\.$",
+  "^warning: Git tree '.*' is dirty$",
+  "^\\s*$",
+]
+on_empty = "nix: ok"
+max_lines = 200
+
+[[tests.nix]]
+name = "flake check keeps the unknown-output warning and the verdict"
+input = """
+evaluating flake...
+checking flake output 'overlays'...
+checking overlay 'overlays.default'...
+checking overlay 'overlays.unstable'...
+checking overlay 'overlays.local'...
+checking flake output 'nixosModules'...
+checking flake output 'homeConfigurations'...
+checking flake output 'nixosConfigurations'...
+checking NixOS configuration 'nixosConfigurations.jeffdesktop'...
+checking NixOS configuration 'nixosConfigurations.jeffserver'...
+warning: unknown flake output 'systemSettings'
+warning: Git tree '/home/jeff/os/jeff' is dirty
+all checks passed!
+"""
+expected = "warning: unknown flake output 'systemSettings'\nall checks passed!"
+
+[[tests.nix]]
+name = "build drops the copying line and keeps the printed store path"
+input = """
+this path will be fetched (74.2 KiB download, 273.0 KiB unpacked):
+  /nix/store/9zfv7sz5fm3x1k0n5l3d5m2k8zq0m9xg-hello-2.12.3
+copying path '/nix/store/9zfv7sz5fm3x1k0n5l3d5m2k8zq0m9xg-hello-2.12.3' from 'https://cache.nixos.org'...
+/nix/store/9zfv7sz5fm3x1k0n5l3d5m2k8zq0m9xg-hello-2.12.3
+"""
+expected = "this path will be fetched (74.2 KiB download, 273.0 KiB unpacked):\n  /nix/store/9zfv7sz5fm3x1k0n5l3d5m2k8zq0m9xg-hello-2.12.3\n/nix/store/9zfv7sz5fm3x1k0n5l3d5m2k8zq0m9xg-hello-2.12.3"
+
+[[tests.nix]]
+name = "hash mismatch keeps specified and got values verbatim"
+input = """
+this derivation will be built:
+  /nix/store/69xwq8c9g4r0a2d3k5h7j1m6n8p0s2v4-rtkfixture.drv
+building '/nix/store/69xwq8c9g4r0a2d3k5h7j1m6n8p0s2v4-rtkfixture.drv'...
+error: hash mismatch in fixed-output derivation '/nix/store/69xwq8c9g4r0a2d3k5h7j1m6n8p0s2v4-rtkfixture.drv':
+         specified: sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
+            got:    sha256-mOpuTyFvL7S2n/+bOkSELDhobKaF8/VdxIxdP7EQe+Q=
+"""
+expected = "this derivation will be built:\n  /nix/store/69xwq8c9g4r0a2d3k5h7j1m6n8p0s2v4-rtkfixture.drv\nerror: hash mismatch in fixed-output derivation '/nix/store/69xwq8c9g4r0a2d3k5h7j1m6n8p0s2v4-rtkfixture.drv':\n         specified: sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=\n            got:    sha256-mOpuTyFvL7S2n/+bOkSELDhobKaF8/VdxIxdP7EQe+Q="
+
+[[tests.nix]]
+name = "eval error keeps the whole trace down to the last error line"
+input = """
+error:
+       … while calling the 'throw' builtin
+
+         at «string»:1:1:
+
+            1| builtins.throw "boom"
+             | ^
+
+       error: boom
+"""
+expected = "error:\n       … while calling the 'throw' builtin\n         at «string»:1:1:\n            1| builtins.throw \"boom\"\n             | ^\n       error: boom"
+
+[[tests.nix]]
+name = "a lone dirty-tree warning is stripped"
+input = "warning: Git tree '/home/jeff/os/jeff' is dirty\n"
+expected = "nix: ok"
+
+[[tests.nix]]
+name = "the dirty-tree warning goes but the error beside it stays"
+input = """
+warning: Git tree '/home/jeff/os/jeff' is dirty
+error: attribute 'nope' missing
+"""
+expected = "error: attribute 'nope' missing"
+
+[[tests.nix]]
+name = "evaluation warnings are kept"
+input = """
+evaluating flake...
+evaluation warning: Package 'gtk+-2.24.33' is deprecated
+all checks passed!
+"""
+expected = "evaluation warning: Package 'gtk+-2.24.33' is deprecated\nall checks passed!"

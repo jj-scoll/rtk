@@ -2154,6 +2154,7 @@ match_command = "^make\\b"
             "markdownlint",
             "mix-compile",
             "mix-format",
+            "nix",
             "ping",
             "pio-run",
             "podman",
@@ -2204,8 +2205,8 @@ match_command = "^make\\b"
         let filters = make_filters(BUILTIN_TOML);
         assert_eq!(
             filters.len(),
-            74,
-            "Expected exactly 74 built-in filters, got {}. \
+            75,
+            "Expected exactly 75 built-in filters, got {}. \
              Update this count when adding/removing filters in src/filters/.",
             filters.len()
         );
@@ -2313,11 +2314,11 @@ expected = "output line 1\noutput line 2"
         let combined = format!("{}\n\n{}", BUILTIN_TOML, new_filter);
         let filters = make_filters(&combined);
 
-        // All 74 existing filters still present + 1 new = 75
+        // All 75 existing filters still present + 1 new = 76
         assert_eq!(
             filters.len(),
-            75,
-            "Expected 75 filters after concat (74 built-in + 1 new)"
+            76,
+            "Expected 76 filters after concat (75 built-in + 1 new)"
         );
 
         // New filter is discoverable

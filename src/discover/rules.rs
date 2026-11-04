@@ -1137,6 +1137,14 @@ pub const RULES: &[RtkRule] = &[
         ..RtkRule::DEFAULT
     },
     RtkRule {
+        pattern: r"^nix\s+(?:flake\s+check|build)(?:\s|$|[;|&()<>])",
+        rtk_cmd: "rtk nix",
+        rewrite_prefixes: &["nix"],
+        category: "Infra",
+        savings_pct: 50.0,
+        ..RtkRule::DEFAULT
+    },
+    RtkRule {
         pattern: r"^liquibase(?:\s|$)",
         rtk_cmd: "rtk liquibase",
         pipeline_safety: PipelineSafety::ProducerOnly,
