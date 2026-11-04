@@ -1,0 +1,13 @@
+{
+  "name": "rtk",
+  "displayName": "RTK",
+  "version": "0.1.0",
+  "description": "Tells Claude how rtk-condensed command output reads, and warns at session start when the rtk on PATH is missing, is another tool named rtk, or is upstream rtk rather than the jj-scoll fork. It does not rewrite commands: turn on the guardrails plugin's rtk option for that.",
+  "author": {
+    "name": "jj-scoll",
+    "url": "https://github.com/jj-scoll"
+  },
+  "repository": "https://github.com/jj-scoll/rtk",
+  "license": "Apache-2.0",
+  "keywords": ["rtk", "tokens", "context"]
+}
