@@ -8,8 +8,9 @@ jobs:
   check-target:
     runs-on: ubuntu-latest
     permissions: {}
-    # Skip develop→master PRs (maintainer releases)
+    # Skip develop→master PRs (maintainer releases); upstream-only (APP_* secrets)
     if: >-
+      github.repository == 'rtk-ai/rtk' &&
       github.event.pull_request.base.ref == 'master' &&
       github.event.pull_request.head.ref != 'develop'
     steps:
