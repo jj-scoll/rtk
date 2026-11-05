@@ -19,9 +19,11 @@ jobs:
   # ═══════════════════════════════════════════════
 
   pre-release:
+    # Upstream-only: needs upstream's v* tags, APP_* secrets and rtk-ai publish targets.
     if: >-
+      github.repository == 'rtk-ai/rtk' && (
       github.ref == 'refs/heads/develop'
-      || (github.event_name == 'workflow_dispatch' && github.ref != 'refs/heads/master')
+      || (github.event_name == 'workflow_dispatch' && github.ref != 'refs/heads/master'))
     runs-on: ubuntu-latest
     outputs:
       tag: ${{ steps.tag.outputs.tag }}
@@ -101,7 +103,7 @@ jobs:
   # ═══════════════════════════════════════════════
 
   release-please:
-    if: github.ref == 'refs/heads/master' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+    if: github.repository == 'rtk-ai/rtk' && github.ref == 'refs/heads/master' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
     runs-on: ubuntu-latest
     outputs:
       release_created: ${{ steps.release.outputs.release_created }}
