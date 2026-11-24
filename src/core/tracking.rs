@@ -2786,18 +2786,23 @@ mod tests {
     ) {
         // Periods bucket by local date, so a fixture's wall-clock time is read as
         // local and stored as the matching UTC instant. Week-boundary cases then
-        // hold in every timezone, not only UTC.
-        let local_wall = chrono::NaiveDateTime::parse_from_str(
+        // hold in every timezone, not only UTC. A full RFC 3339 instant (with
+        // fractional seconds or an offset) already names its moment: store it as is.
+        let stored = match chrono::NaiveDateTime::parse_from_str(
             timestamp.trim_end_matches('Z'),
             "%Y-%m-%dT%H:%M:%S",
-        )
-        .expect("fixture timestamp is YYYY-MM-DDTHH:MM:SS[Z]");
-        let stored = local_wall
-            .and_local_timezone(chrono::Local)
-            .earliest()
-            .expect("fixture wall-clock time exists locally")
-            .with_timezone(&chrono::Utc)
-            .to_rfc3339();
+        ) {
+            Ok(local_wall) => local_wall
+                .and_local_timezone(chrono::Local)
+                .earliest()
+                .expect("fixture wall-clock time exists locally")
+                .with_timezone(&chrono::Utc)
+                .to_rfc3339(),
+            Err(_) => DateTime::parse_from_rfc3339(timestamp)
+                .expect("fixture timestamp is YYYY-MM-DDTHH:MM:SS[Z] or RFC 3339")
+                .with_timezone(&chrono::Utc)
+                .to_rfc3339(),
+        };
         let saved = input - output;
         let savings_pct = if input > 0 {
             saved as f64 / input as f64 * 100.0
