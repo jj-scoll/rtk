@@ -1,0 +1,152 @@
+[
+  {
+    "conclusion": "success",
+    "createdAt": "2026-11-25T10:01:30Z",
+    "databaseId": 45590961368,
+    "displayTitle": "pages",
+    "event": "workflow_dispatch",
+    "headBranch": "main",
+    "name": "pages",
+    "status": "completed"
+  },
+  {
+    "conclusion": "success",
+    "createdAt": "2026-11-25T09:51:36Z",
+    "databaseId": 45589401086,
+    "displayTitle": "fix(guardrails): close gaps found by a 10,705-case mutation test (#85)",
+    "event": "push",
+    "headBranch": "main",
+    "name": "pages",
+    "status": "completed"
+  },
+  {
+    "conclusion": "success",
+    "createdAt": "2026-11-25T09:51:36Z",
+    "databaseId": 45589400643,
+    "displayTitle": "fix(guardrails): close gaps found by a 10,705-case mutation test (#85)",
+    "event": "push",
+    "headBranch": "main",
+    "name": "Scorecard supply-chain security",
+    "status": "completed"
+  },
+  {
+    "conclusion": "success",
+    "createdAt": "2026-11-25T09:51:36Z",
+    "databaseId": 45589400628,
+    "displayTitle": "fix(guardrails): close gaps found by a 10,705-case mutation test (#85)",
+    "event": "push",
+    "headBranch": "main",
+    "name": "autorelease",
+    "status": "completed"
+  },
+  {
+    "conclusion": "success",
+    "createdAt": "2026-11-25T09:51:36Z",
+    "databaseId": 45589400578,
+    "displayTitle": "fix(guardrails): close gaps found by a 10,705-case mutation test (#85)",
+    "event": "push",
+    "headBranch": "main",
+    "name": "ci",
+    "status": "completed"
+  },
+  {
+    "conclusion": "success",
+    "createdAt": "2026-11-25T09:46:02Z",
+    "databaseId": 45588520319,
+    "displayTitle": "fix(guardrails): close gaps found by a 10,705-case mutation test",
+    "event": "pull_request",
+    "headBranch": "fix/guard-mutation-gaps",
+    "name": "changelog",
+    "status": "completed"
+  },
+  {
+    "conclusion": "success",
+    "createdAt": "2026-11-25T09:46:02Z",
+    "databaseId": 45588520298,
+    "displayTitle": "fix(guardrails): close gaps found by a 10,705-case mutation test",
+    "event": "pull_request",
+    "headBranch": "fix/guard-mutation-gaps",
+    "name": "ci",
+    "status": "completed"
+  },
+  {
+    "conclusion": "success",
+    "createdAt": "2026-11-25T09:00:01Z",
+    "databaseId": 45581230602,
+    "displayTitle": "fix(guardrails): close gaps found by a 10,705-case mutation test",
+    "event": "pull_request",
+    "headBranch": "fix/guard-mutation-gaps",
+    "name": "ci",
+    "status": "completed"
+  },
+  {
+    "conclusion": "success",
+    "createdAt": "2026-11-25T09:00:01Z",
+    "databaseId": 45581230510,
+    "displayTitle": "fix(guardrails): close gaps found by a 10,705-case mutation test",
+    "event": "pull_request",
+    "headBranch": "fix/guard-mutation-gaps",
+    "name": "changelog",
+    "status": "completed"
+  },
+  {
+    "conclusion": "success",
+    "createdAt": "2026-11-25T08:29:12Z",
+    "databaseId": 45576681336,
+    "displayTitle": "ci: one changelog entry file per pull request instead of a shared Unr\u2026",
+    "event": "push",
+    "headBranch": "main",
+    "name": "pages",
+    "status": "completed"
+  },
+  {
+    "conclusion": "success",
+    "createdAt": "2026-11-25T08:29:12Z",
+    "databaseId": 45576681272,
+    "displayTitle": "ci: one changelog entry file per pull request instead of a shared Unr\u2026",
+    "event": "push",
+    "headBranch": "main",
+    "name": "Scorecard supply-chain security",
+    "status": "completed"
+  },
+  {
+    "conclusion": "success",
+    "createdAt": "2026-11-25T08:29:12Z",
+    "databaseId": 45576681230,
+    "displayTitle": "ci: one changelog entry file per pull request instead of a shared Unr\u2026",
+    "event": "push",
+    "headBranch": "main",
+    "name": "ci",
+    "status": "completed"
+  },
+  {
+    "conclusion": "success",
+    "createdAt": "2026-11-25T08:12:31Z",
+    "databaseId": 45574279208,
+    "displayTitle": "ci: one changelog entry file per pull request instead of a shared Unreleased section",
+    "event": "pull_request",
+    "headBranch": "ci/changelog-fragments",
+    "name": "changelog",
+    "status": "completed"
+  },
+  {
+    "conclusion": "success",
+    "createdAt": "2026-11-25T08:12:31Z",
+    "databaseId": 45574279177,
+    "displayTitle": "ci: one changelog entry file per pull request instead of a shared Unreleased section",
+    "event": "pull_request",
+    "headBranch": "ci/changelog-fragments",
+    "name": "ci",
+    "status": "completed"
+  },
+  {
+    "conclusion": "success",
+    "createdAt": "2026-11-25T08:11:50Z",
+    "databaseId": 45574180304,
+    "displayTitle": "pages",
+    "event": "workflow_dispatch",
+    "headBranch": "main",
+    "name": "pages",
+    "status": "completed"
+  }
+]

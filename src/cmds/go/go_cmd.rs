@@ -45,6 +45,7 @@ struct PackageResult {
     package_failed: bool,                     // package-level failure (timeout, signal, etc.)
     package_fail_output: Vec<String>,         // output lines collected before the package fail
     fuzz_summary: Option<String>,
+    result_line: Option<String>, // go's own `ok  \t<pkg>\t...` / `FAIL\t<pkg>\t...` line
 }
 
 fn forwarded_help(subcommand: &str, args: &[String], verbose: u8) -> Result<i32> {
@@ -78,17 +79,21 @@ pub fn run_test(args: &[String], verbose: u8) -> Result<i32> {
         );
     }
 
-    let filter: fn(&str) -> String = if skip_json {
-        |s: &str| s.to_string()
-    } else {
-        filter_go_test_json
-    };
+    let verbose_run = args
+        .iter()
+        .any(|a| a == "-v" || a == "-test.v" || a.starts_with("-v=") || a.starts_with("-test.v="));
 
     runner::run_filtered(
         cmd,
         "go test",
         &display_args(args),
-        filter,
+        move |s: &str| {
+            if skip_json {
+                s.to_string()
+            } else {
+                filter_go_test_run(s, verbose_run)
+            }
+        },
         crate::core::runner::RunOptions::stdout_only().tee("go_test"),
     )
 }
@@ -455,7 +460,60 @@ pub(crate) fn filter_go_test_pipe(input: &str) -> String {
 }
 
 /// Parse go test -json output (NDJSON format)
+/// What plain `go test` (without `-json`) would have printed for this event stream:
+/// every output line under `-v`; otherwise the output of failed tests, package-level
+/// output and build output, without the `=== RUN`-style progress frames.
+fn plain_go_test_output(output: &str, verbose: bool) -> String {
+    let mut plain = String::new();
+    let mut pending: HashMap<(String, String), String> = HashMap::new();
+    for line in output.lines() {
+        let Ok(event) = serde_json::from_str::<GoTestEvent>(line.trim()) else {
+            continue;
+        };
+        let package = event.package.clone().unwrap_or_default();
+        match (event.action.as_str(), &event.test, &event.output) {
+            // Without -v, go folds PASS and the coverage line into the package's ok line.
+            ("output", None, Some(text))
+                if !verbose && (text == "PASS\n" || text.starts_with("coverage: ")) => {}
+            ("output" | "build-output", None, Some(text)) => plain.push_str(text),
+            ("output", Some(_), Some(text)) if verbose => plain.push_str(text),
+            ("output", Some(test), Some(text)) => {
+                if !text.starts_with("=== ") {
+                    pending
+                        .entry((package, test.clone()))
+                        .or_default()
+                        .push_str(text);
+                }
+            }
+            ("fail", Some(test), _) => {
+                if let Some(text) = pending.remove(&(package, test.clone())) {
+                    plain.push_str(&text);
+                }
+            }
+            ("pass" | "skip", Some(test), _) => {
+                pending.remove(&(package, test.clone()));
+            }
+            _ => {}
+        }
+    }
+    plain
+}
+
+/// `rtk go test`: the JSON summary, unless plain `go test` would have printed less.
+fn filter_go_test_run(output: &str, verbose: bool) -> String {
+    let filtered = summarize_go_test_json(output, true);
+    let plain = plain_go_test_output(output, verbose);
+    never_worse(plain.trim_end(), &filtered).to_string()
+}
+
+/// The summary `rtk pipe -f go-test` prints: counts and failures only.
 pub(crate) fn filter_go_test_json(output: &str) -> String {
+    summarize_go_test_json(output, false)
+}
+
+/// Summarize a `go test -json` stream. With `result_lines`, go's own per-package
+/// `ok`/`FAIL` lines close the summary, carrying the import path, `(cached)` and coverage.
+fn summarize_go_test_json(output: &str, result_lines: bool) -> String {
     let mut packages: HashMap<String, PackageResult> = HashMap::new();
     let mut current_test_output: HashMap<(String, String), Vec<String>> = HashMap::new(); // (package, test) -> outputs
     let mut build_output: HashMap<String, Vec<String>> = HashMap::new(); // import_path -> error lines
@@ -543,6 +601,9 @@ pub(crate) fn filter_go_test_json(output: &str) -> String {
                     } else {
                         // Package-level output (timeout messages, signal info, etc.)
                         let trimmed = output_text.trim();
+                        if output_text.starts_with("ok ") || output_text.starts_with("FAIL\t") {
+                            pkg_result.result_line = Some(output_text.trim_end().to_string());
+                        }
                         if !trimmed.is_empty() {
                             pkg_result.package_fail_output.push(trimmed.to_string());
                         }
@@ -553,11 +614,29 @@ pub(crate) fn filter_go_test_json(output: &str) -> String {
         }
     }
 
+    // A failing subtest also fails its parent; count and list it once, unless the
+    // parent printed a failure of its own.
+    for pkg in packages.values_mut() {
+        let names: Vec<String> = pkg.failed_tests.iter().map(|(n, _)| n.clone()).collect();
+        let before = pkg.failed_tests.len();
+        pkg.failed_tests.retain(|(name, outputs)| {
+            let prefix = format!("{name}/");
+            !names.iter().any(|n| n.starts_with(&prefix))
+                || !select_go_test_failure_lines(outputs).is_empty()
+        });
+        pkg.fail -= before - pkg.failed_tests.len();
+    }
+
     // Build summary
     let total_packages = packages.len();
     let total_pass: usize = packages.values().map(|p| p.pass).sum();
     let total_fail: usize = packages.values().map(|p| p.fail).sum();
     let total_skip: usize = packages.values().map(|p| p.skip).sum();
+    let total_panic: usize = packages
+        .values()
+        .flat_map(|p| &p.failed_tests)
+        .filter(|(_, outputs)| test_panicked(outputs))
+        .count();
     let total_build_fail: usize = packages.values().filter(|p| p.build_failed).count();
     // Only count package-level fails for packages with no individual test or build failures.
     // go test -json emits a trailing package-level {"action":"fail"} after any test failure
@@ -582,18 +661,25 @@ pub(crate) fn filter_go_test_json(output: &str) -> String {
     }
 
     if !has_failures {
-        return format!(
-            "Go test: {} passed in {} packages",
+        let mut result = format!(
+            "Go test: {} passed in {} packages\n",
             total_pass, total_packages
         );
+        if result_lines {
+            push_result_lines(&mut result, &packages, |_| true);
+        }
+        return result.trim().to_string();
     }
 
     let mut result = String::new();
     result.push_str(&format!(
         "Go test: {} passed, {} failed",
         total_pass,
-        total_fail + total_build_fail + total_pkg_fail
+        total_fail - total_panic + total_build_fail + total_pkg_fail
     ));
+    if total_panic > 0 {
+        result.push_str(&format!(", {} panicked", total_panic));
+    }
     if total_skip > 0 {
         result.push_str(&format!(", {} skipped", total_skip));
     }
@@ -612,7 +698,7 @@ pub(crate) fn filter_go_test_json(output: &str) -> String {
         for line in &pkg_result.package_fail_output {
             let trimmed = line.trim();
             if !trimmed.is_empty() {
-                result.push_str(&format!("  {}\n", truncate(trimmed, 120)));
+                result.push_str(&format!("  {}\n", trimmed));
             }
         }
     }
@@ -643,23 +729,71 @@ pub(crate) fn filter_go_test_json(output: &str) -> String {
             continue;
         }
 
+        let panicked = pkg_result
+            .failed_tests
+            .iter()
+            .filter(|(_, outputs)| test_panicked(outputs))
+            .count();
+        let panic_note = if panicked > 0 {
+            format!(", {} panicked", panicked)
+        } else {
+            String::new()
+        };
         result.push_str(&format!(
-            "\n{} ({} passed, {} failed)\n",
+            "\n{} ({} passed, {} failed{})\n",
             compact_package_name(package),
             pkg_result.pass,
-            pkg_result.fail
+            pkg_result.fail - panicked,
+            panic_note
         ));
 
         for (test, outputs) in &pkg_result.failed_tests {
-            result.push_str(&format!("  [FAIL] {}\n", test));
+            let label = if test_panicked(outputs) {
+                "PANIC"
+            } else {
+                "FAIL"
+            };
+            result.push_str(&format!("  [{}] {}\n", label, test));
 
             for line in select_go_test_failure_lines(outputs) {
-                result.push_str(&format!("     {}\n", truncate(&line, 100)));
+                result.push_str(&format!("     {}\n", line));
             }
         }
     }
 
+    // go's own result line for every package not already shown with its package-level
+    // output or build errors: the full import path, `(cached)` and coverage.
+    if result_lines {
+        result.push('\n');
+        push_result_lines(&mut result, &packages, |p| {
+            !p.build_failed && !(p.package_failed && p.fail == 0)
+        });
+    }
+
     result.trim().to_string()
+}
+
+fn push_result_lines(
+    result: &mut String,
+    packages: &HashMap<String, PackageResult>,
+    include: impl Fn(&PackageResult) -> bool,
+) {
+    let mut lines: Vec<&str> = packages
+        .values()
+        .filter(|p| include(p))
+        .filter_map(|p| p.result_line.as_deref())
+        .collect();
+    lines.sort_by_key(|line| line.split('\t').nth(1).unwrap_or(line));
+    for line in lines {
+        result.push_str(line);
+        result.push('\n');
+    }
+}
+
+fn test_panicked(outputs: &[String]) -> bool {
+    outputs
+        .iter()
+        .any(|line| line.trim_start().starts_with("panic:"))
 }
 
 fn format_fuzz_summary(
@@ -689,17 +823,42 @@ fn format_fuzz_summary(
 }
 
 fn select_go_test_failure_lines(outputs: &[String]) -> Vec<String> {
+    const MAX_FAILURE_LINES: usize = 8;
+    let is_frame_noise = |line: &str| {
+        line.is_empty()
+            || line.starts_with("=== ")
+            || line.starts_with("--- FAIL")
+            || line.starts_with("--- PASS")
+    };
+    let goroot = goroot_prefix(outputs);
     let mut relevant = Vec::new();
     let mut keep_next_context_line = false;
+    let mut in_panic = false;
 
-    for line in outputs {
-        let trimmed = line.trim();
+    let mut i = 0;
+    while i < outputs.len() && relevant.len() < MAX_FAILURE_LINES {
+        let trimmed = outputs[i].trim();
+        i += 1;
 
-        if trimmed.is_empty()
-            || trimmed.starts_with("=== RUN")
-            || trimmed.starts_with("--- FAIL")
-            || trimmed.starts_with("--- PASS")
-        {
+        if in_panic {
+            // A panic's stack: keep the function/location pairs in the repo and its
+            // dependencies; the runtime and testing frames from GOROOT say nothing new.
+            if trimmed.starts_with("goroutine ") {
+                continue;
+            }
+            if let Some(location) = outputs.get(i).map(|l| l.trim())
+                && is_stack_frame_location(location)
+            {
+                i += 1;
+                if !goroot.is_some_and(|root| location.starts_with(root)) {
+                    relevant.push(trimmed.to_string());
+                    relevant.push(location.to_string());
+                }
+                continue;
+            }
+        }
+
+        if is_frame_noise(trimmed) {
             keep_next_context_line = false;
             continue;
         }
@@ -713,24 +872,34 @@ fn select_go_test_failure_lines(outputs: &[String]) -> Vec<String> {
         } else {
             keep_next_context_line = false;
         }
-
-        if relevant.len() >= 5 {
-            break;
-        }
+        in_panic |= trimmed.starts_with("panic:");
     }
 
     if relevant.is_empty()
-        && let Some(line) = outputs.iter().map(|line| line.trim()).find(|line| {
-            !line.is_empty()
-                && !line.starts_with("=== RUN")
-                && !line.starts_with("--- FAIL")
-                && !line.starts_with("--- PASS")
-        })
+        && let Some(line) = outputs
+            .iter()
+            .map(|line| line.trim())
+            .find(|line| !is_frame_noise(line))
     {
         relevant.push(line.to_string());
     }
 
     relevant
+}
+
+/// The `<GOROOT>/src/` prefix of a panic's stack, read off the testing package's
+/// own frame, which every test panic passes through.
+fn goroot_prefix(outputs: &[String]) -> Option<&str> {
+    outputs.iter().find_map(|line| {
+        let line = line.trim();
+        let at = line.find("/src/testing/testing.go:")?;
+        Some(&line[..at + "/src/".len()])
+    })
+}
+
+/// The location line under a stack frame's function: `<path>.go:<line> +0x<pc>`.
+fn is_stack_frame_location(line: &str) -> bool {
+    is_go_test_location_line(line) && (line.starts_with('/') || line.contains(" +0x"))
 }
 
 fn is_go_test_location_line(line: &str) -> bool {
@@ -971,6 +1140,98 @@ mod tests {
         }
         assert!(!is_go_test_json("go: downloading example.com/dep v1.0.0\n"));
         assert!(!is_go_test_json(r#"{"Action":"start"}"#));
+    }
+
+    // Fixtures: real `go test -json` captures (Go 1.27.3), trimmed to the failing tests
+    // and a few passing ones, with home and module paths sanitized.
+    const CACHED_COVER_JSON: &str =
+        include_str!("../../../tests/fixtures/go_test_cached_cover.json");
+    const SUBTEST_FAIL_JSON: &str =
+        include_str!("../../../tests/fixtures/go_test_subtest_fail.json");
+    const PANIC_JSON: &str = include_str!("../../../tests/fixtures/go_test_panic.json");
+    const SETUP_FAIL_JSON: &str =
+        include_str!("../../../tests/fixtures/go_test_package_setup_fail.json");
+
+    #[test]
+    fn go_test_pass_keeps_each_package_result_line() {
+        // `go test -cover ./internal/...` served from the cache.
+        let out = summarize_go_test_json(CACHED_COVER_JSON, true);
+        for line in [
+            "ok  \tgithub.com/example/broodhall/internal/container\t(cached)\tcoverage: 98.9% of statements",
+            "ok  \tgithub.com/example/broodhall/internal/pytext\t(cached)\tcoverage: 98.8% of statements",
+        ] {
+            assert!(out.contains(line), "missing {line:?} in:\n{out}");
+        }
+    }
+
+    #[test]
+    fn go_test_failure_keeps_the_whole_assertion_and_passing_package_lines() {
+        // `go test ./internal/...`: one subtest of TestCmd fails, pytext passes from cache.
+        let out = summarize_go_test_json(SUBTEST_FAIL_JSON, true);
+        assert!(
+            out.contains(r#"want ["ls"], [{./a /x} {~/b /y} {$H /z}]"#),
+            "assertion cut short:\n{out}"
+        );
+        assert!(
+            out.contains("FAIL\tgithub.com/example/broodhall/internal/container\t"),
+            "{out}"
+        );
+        assert!(
+            out.contains("ok  \tgithub.com/example/broodhall/internal/pytext\t(cached)"),
+            "{out}"
+        );
+        // The failing subtest is counted once, not again as its parent TestCmd.
+        assert!(out.contains(", 1 failed"), "{out}");
+        assert!(!out.contains("[FAIL] TestCmd\n"), "{out}");
+    }
+
+    #[test]
+    fn go_test_panic_keeps_the_repo_frame_and_says_it_panicked() {
+        let out = filter_go_test_json(PANIC_JSON);
+        assert!(out.contains("internal/pytext/cache_test.go:9"), "{out}");
+        assert!(
+            out.contains("panic: assignment to entry in nil map"),
+            "{out}"
+        );
+        assert!(!out.contains("/src/testing/testing.go"), "{out}");
+        assert!(out.contains("1 panicked"), "{out}");
+        assert!(out.contains("[PANIC] TestDecodeCacheWarm"), "{out}");
+    }
+
+    #[test]
+    fn go_test_package_failure_line_is_not_truncated() {
+        let out = filter_go_test_json(SETUP_FAIL_JSON);
+        assert!(out.contains("(set MEMORY_EXT_DIR)"), "{out}");
+        assert!(
+            out.contains("FAIL\tgithub.com/example/broodhall/cmd/memory\t0.023s"),
+            "{out}"
+        );
+    }
+
+    #[test]
+    fn go_test_run_output_is_never_larger_than_plain_go_test() {
+        for (json, verbose) in [
+            (CACHED_COVER_JSON, false),
+            (CACHED_COVER_JSON, true),
+            (SUBTEST_FAIL_JSON, false),
+            (PANIC_JSON, false),
+            (SETUP_FAIL_JSON, false),
+        ] {
+            let plain = plain_go_test_output(json, verbose);
+            let out = filter_go_test_run(json, verbose);
+            assert!(
+                crate::core::tracking::estimate_tokens(&out)
+                    <= crate::core::tracking::estimate_tokens(&plain),
+                "rtk output larger than plain go test:\n{out}\n---\n{plain}"
+            );
+        }
+        // Non-verbose plain output of a passing run is just go's result lines.
+        let plain = plain_go_test_output(CACHED_COVER_JSON, false);
+        assert!(!plain.contains("=== RUN"), "{plain}");
+        assert!(
+            plain.contains("ok  \tgithub.com/example/broodhall/internal/pytext"),
+            "{plain}"
+        );
     }
 
     #[test]

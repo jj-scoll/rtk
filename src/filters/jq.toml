@@ -1,6 +1,10 @@
 [filters.jq]
 description = "Compact jq output — truncate large JSON results"
 match_command = "^jq\\b"
+# jq prints what the user's filter selected; cutting a mid-sized result at 40 lines dropped
+# the fields asked for. Up to 32 KiB (about 8,000 tokens by RTK's bytes/4 estimate) is shown
+# whole; past that the line cap below applies, recoverably.
+passthrough_max_bytes = 32768
 strip_ansi = true
 strip_lines_matching = [
   "^\\s*$",
@@ -17,6 +21,15 @@ input = """
 }
 """
 expected = "{\n  \"name\": \"test\",\n  \"version\": \"1.0\"\n}"
+
+[[tests.jq]]
+name = "output under the passthrough size keeps blank lines and long lines"
+input = """
+"a"
+
+"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+"""
+expected = "\"a\"\n\n\"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\""
 
 [[tests.jq]]
 name = "empty input passes through"

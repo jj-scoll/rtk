@@ -1,0 +1,142 @@
+b78d3cd fix(guardrails): let dry-run pushes, help requests, shell -n and in-tree find -delete pass (8 hours ago) <example>
+git push --dry-run, --help/--version on chmod/chown/rm, -h/-help/--help on terraform and tofu
+destroy, bash/sh/zsh -n, and find -delete or -exec rm on a start path the rm rule allows no
+longer block or ask. Each keeps its blocking counterpart.
+
+Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>
+---END---
+dcad543 Merge origin/main into fix/guard-mutation-gaps (8 hours ago) <example>
+Move the changelog entry to changelog.d/ per the new per-PR convention.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---END---
+76180c4 fix(guardrails): let aws s3 rm --recursive --dryrun pass (8 hours ago) <example>
+The dry run deletes nothing and is what the s3-rm ask itself suggests.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---END---
+42a250d fix(guardrails): bound the work parseShell spends resolving a command (8 hours ago) <example>
+Functions that call each other in a fan-out (e calls d 60 times, d
+calls c 60 times, ...) walked their bodies millions of times and hung
+the hook, and printf '%0999999999d' would have built a gigabyte string.
+Function bodies are now walked again at most 64 times per parse, and a
+printf conversion with a 4+ digit width is not worked out (piped into a
+shell, it asks as opaque-shell).
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---END---
+1c3edd4 docs(guardrails): document the respelling-proof reads and the new asks (8 hours ago) <example>
+Bash core now lists the resolved spellings, the device-only dd rule,
+the any-mode recursive chmod rule and an Asks table (iac-destroy, s3-rm,
+find-delete, dynamic-command, opaque-shell). Git gains push +refspec and
+push --delete; Nudges says a destroy asks instead of noting. Changelog
+entry under Unreleased.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---END---
+5d0b844 feat(guardrails): read shell commands in python and perl one-liners (8 hours ago) <example>
+python3 -c 'import os; os.system("rm -rf ~")', subprocess.run(...,
+shell=True), subprocess.check_call([...]) and perl -e 'system("sh",
+"-c", $ARGV[0])' 'rm -rf ~' ran a shell command no rule saw.
+
+- interpshell.go: the literal arguments of os.system, os.popen,
+  subprocess.* and perl system/exec (with $ARGV[n] taken from the
+  one-liner's own arguments) are parsed like a bash -c string, leniently.
+  Strings the code builds at run time are not found; print("rm -rf ~")
+  is data and passes.
+- settingsGuard's quick text filter now also reads the parsed words, so
+  an encoded rm -rf ~/.claude (base64 | sh) reaches the settings ask.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---END---
+8b91767 feat(guardrails): judge code piped or sourced into a shell (8 hours ago) <example>
+printf 'rm -rf ~' | sh, echo <base64> | base64 -d | sh and
+source <(printf ...) were allowed: the guard never read what the shell
+would run. sh <<'EOF' with continued lines was misread too.
+
+- A pipe into sh, bash or zsh reading stdin, and source, . or a shell
+  given <(...), now parse the producer's output with every rule when the
+  text fixes it (echo, printf, cat and base64 -d of fixed input).
+- Otherwise they ask (opaque-shell), unless the producer downloads
+  (download-exec already asks) or only cats files, which is the same as
+  sh file and still passes.
+- A heredoc under a quoted delimiter feeds its raw body, so backslash
+  continuations reach the inner parse intact.
+- THREAT_MODEL: residual risk R02 (encoded payload) is closed; it is
+  now T11c, with T11d for the opaque-shell ask.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---END---
+78035bc feat(guardrails): resolve computed command names before the rules read them (8 hours ago) <example>
+c=rm; "$c" -rf ~, $'\x72\x6d' -rf ~, "$(printf '\162\155')" -rf /,
+{rm,-rf,~}, rm${IFS}-rf${IFS}$HOME and r() { rm "$@"; }; r -rf ~ all ran
+past every parsed rule, which saw a name that was not rm.
+
+- shellexpand.go: parseShell now resolves what the text alone decides:
+  the line's own assignments, ANSI-C quoting, command substitutions of
+  echo/printf/cat/base64 -d with fixed input, brace expansion (capped at
+  64 words), word splitting of unquoted resolved values, the default
+  $IFS, and $@ $1.. inside a call of a function the line defines (its
+  body is walked again with the call's arguments). Inherited variables
+  and real substitutions stay as written.
+- dynamicCommand: a name still unresolved ("$c", $GIT, $(which git))
+  asks (dynamic-command) only when its arguments would trip an rm, git,
+  chmod, chown, dd, find, terraform or aws rule, so "$EDITOR" file,
+  $PYTHON x.py and ${GO:-go} build stay allowed.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---END---
+3587dba ci: one changelog entry file per pull request instead of a shared Unreleased section (#84) (8 hours ago) <example>
+Every release writes "## X.Y.Z" at the top of docs/guide/changelog.md, the
+same lines a pull request's "## Unreleased" block sits on, so every open
+pull request conflicted after every merge (and with each other). #83 lost
+its entries when that conflict was resolved in favour of main in the web
+editor.
+
+Pull requests now add changelog.d/<branch>.md. The release's stamp step
+gathers those files, in file-name order, into the new version section and
+deletes them; check requires a pull request that changes shipped files to
+add one whose first line is a "- " bullet. Separate files never touch the
+same lines, so neither a release nor another pull request can conflict
+with an entry. This is the towncrier / changesets / changie pattern.
+
+Co-authored-by: Claude Opus 5.5 <noreply@anthropic.com>
+---END---
+8e68e08 fix(guardrails): resolve rm/chmod/chown targets before comparing them (8 hours ago) <example>
+Protected targets were compared as text, so rm -rf /home/../home/user,
+$HOME/../user, /hom[e]/user and T=~; rm -rf "$T" were allowed.
+
+- rootName now falls back to the resolved path: a leading ~ or $HOME
+  expanded, path.Clean, a trailing /* dropped, and a glob segment matched
+  against each protected target (/h* is /home).
+- parseShell substitutes variables the same command line assigned earlier
+  (plain, export, declare, local, readonly) into the words it returns, so
+  every parsed rule reads "$T" as its value. Values keep unresolved
+  expansions as written ($HOME stays $HOME).
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---END---
+c049f04 fix(guardrails): read the settings guard's commands as the shell passes them (8 hours ago) <example>
+\rm -rf ~/.claude, r''m, r\m and a line-continued rm were allowed while the
+same spellings against ~ blocked: the settings guard only scanned the raw
+text, where \rm is not rm and a continuation splits the command. It now
+also runs fileWriteOp on each parsed command's argv (the words the rm -rf ~
+rule reads), with the same cd tracking for relative paths.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---END---
+15f6c73 feat(guardrails): ask before terraform destroy, aws s3 rm --recursive, find -delete, git push --delete (8 hours ago) <example>
+None of these had a rule. Each now asks, the way git reset --hard does:
+
+- iac-destroy: terraform, tofu or terragrunt destroy, and apply -destroy
+  (plan -destroy still passes). It asks even after a plan; the
+  plan-before-apply nudge for apply is unchanged.
+- s3-rm: aws s3 rm --recursive and aws s3 rb --force, global options
+  such as --profile skipped (a single-key rm passes).
+- find-delete: find -delete, or -exec/-execdir rm.
+- git-push-delete (git family): git push --delete, -d, or :branch.
+
+The non-git asks have no switch, like download-exec.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---END---

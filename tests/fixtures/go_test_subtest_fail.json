@@ -1,0 +1,29 @@
+{"Time":"2026-11-25T06:11:22.148787069-05:00","Action":"start","Package":"github.com/example/broodhall/internal/container"}
+{"Time":"2026-11-25T06:11:22.149130245-05:00","Action":"start","Package":"github.com/example/broodhall/internal/pytext"}
+{"Time":"2026-11-25T06:11:22.1491615-05:00","Action":"run","Package":"github.com/example/broodhall/internal/pytext","Test":"TestDecodeJSON"}
+{"Time":"2026-11-25T06:11:22.149309279-05:00","Action":"pass","Package":"github.com/example/broodhall/internal/pytext","Test":"TestDecodeJSON","Elapsed":0}
+{"Time":"2026-11-25T06:11:22.149312126-05:00","Action":"run","Package":"github.com/example/broodhall/internal/pytext","Test":"TestObjKeyOrderAndDuplicates"}
+{"Time":"2026-11-25T06:11:22.149321998-05:00","Action":"pass","Package":"github.com/example/broodhall/internal/pytext","Test":"TestObjKeyOrderAndDuplicates","Elapsed":0}
+{"Time":"2026-11-25T06:11:22.149323772-05:00","Action":"run","Package":"github.com/example/broodhall/internal/pytext","Test":"TestObjAccessors"}
+{"Time":"2026-11-25T06:11:22.149330226-05:00","Action":"pass","Package":"github.com/example/broodhall/internal/pytext","Test":"TestObjAccessors","Elapsed":0}
+{"Time":"2026-11-25T06:11:22.150644279-05:00","Action":"output","Package":"github.com/example/broodhall/internal/pytext","Output":"PASS\n","OutputType":"frame"}
+{"Time":"2026-11-25T06:11:22.150646572-05:00","Action":"output","Package":"github.com/example/broodhall/internal/pytext","Output":"ok  \tgithub.com/example/broodhall/internal/pytext\t(cached)\n"}
+{"Time":"2026-11-25T06:11:22.15066031-05:00","Action":"pass","Package":"github.com/example/broodhall/internal/pytext","Elapsed":0.002}
+{"Time":"2026-11-25T06:11:22.152551241-05:00","Action":"run","Package":"github.com/example/broodhall/internal/container","Test":"TestSub"}
+{"Time":"2026-11-25T06:11:22.152828342-05:00","Action":"pass","Package":"github.com/example/broodhall/internal/container","Test":"TestSub","Elapsed":0}
+{"Time":"2026-11-25T06:11:22.152831255-05:00","Action":"run","Package":"github.com/example/broodhall/internal/container","Test":"TestCmd"}
+{"Time":"2026-11-25T06:11:22.152833262-05:00","Action":"output","Package":"github.com/example/broodhall/internal/container","Test":"TestCmd","Output":"=== RUN   TestCmd\n","OutputType":"frame"}
+{"Time":"2026-11-25T06:11:22.153012811-05:00","Action":"run","Package":"github.com/example/broodhall/internal/container","Test":"TestCmd/relative_and_tilde_and_var_hosts"}
+{"Time":"2026-11-25T06:11:22.153014389-05:00","Action":"output","Package":"github.com/example/broodhall/internal/container","Test":"TestCmd/relative_and_tilde_and_var_hosts","Output":"=== RUN   TestCmd/relative_and_tilde_and_var_hosts\n","OutputType":"frame"}
+{"Time":"2026-11-25T06:11:22.153134069-05:00","Action":"output","Package":"github.com/example/broodhall/internal/container","Test":"TestCmd/relative_and_tilde_and_var_hosts","Output":"    container_test.go:79: Cmd([\"docker\" \"run\" \"-v\" \"./a:/x\" \"-v\" \"~/b:/y\" \"-v\" \"$H:/z\" \"alpine\" \"ls\"]) = [\"ls\"], [{./a /x} {$H /z}]; want [\"ls\"], [{./a /x} {~/b /y} {$H /z}]\n","OutputType":"error"}
+{"Time":"2026-11-25T06:11:22.153157095-05:00","Action":"output","Package":"github.com/example/broodhall/internal/container","Test":"TestCmd/relative_and_tilde_and_var_hosts","Output":"--- FAIL: TestCmd/relative_and_tilde_and_var_hosts (0.00s)\n","OutputType":"frame"}
+{"Time":"2026-11-25T06:11:22.153159755-05:00","Action":"fail","Package":"github.com/example/broodhall/internal/container","Test":"TestCmd/relative_and_tilde_and_var_hosts","Elapsed":0}
+{"Time":"2026-11-25T06:11:22.153328584-05:00","Action":"output","Package":"github.com/example/broodhall/internal/container","Test":"TestCmd","Output":"--- FAIL: TestCmd (0.00s)\n","OutputType":"frame"}
+{"Time":"2026-11-25T06:11:22.153330681-05:00","Action":"fail","Package":"github.com/example/broodhall/internal/container","Test":"TestCmd","Elapsed":0}
+{"Time":"2026-11-25T06:11:22.153332493-05:00","Action":"run","Package":"github.com/example/broodhall/internal/container","Test":"TestWithin"}
+{"Time":"2026-11-25T06:11:22.153339735-05:00","Action":"pass","Package":"github.com/example/broodhall/internal/container","Test":"TestWithin","Elapsed":0}
+{"Time":"2026-11-25T06:11:22.153341539-05:00","Action":"run","Package":"github.com/example/broodhall/internal/container","Test":"TestMapPath"}
+{"Time":"2026-11-25T06:11:22.153520965-05:00","Action":"pass","Package":"github.com/example/broodhall/internal/container","Test":"TestMapPath","Elapsed":0}
+{"Time":"2026-11-25T06:11:22.153523419-05:00","Action":"output","Package":"github.com/example/broodhall/internal/container","Output":"FAIL\n","OutputType":"frame"}
+{"Time":"2026-11-25T06:11:22.154453103-05:00","Action":"output","Package":"github.com/example/broodhall/internal/container","Output":"FAIL\tgithub.com/example/broodhall/internal/container\t0.005s\n","OutputType":"frame"}
+{"Time":"2026-11-25T06:11:22.155401965-05:00","Action":"fail","Package":"github.com/example/broodhall/internal/container","Elapsed":0.007}

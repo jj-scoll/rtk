@@ -341,7 +341,7 @@ fn list_prs(args: &[String], _verbose: u8) -> Result<i32> {
         "pr",
         "list",
         "--json",
-        "number,title,state,author,updatedAt",
+        "number,title,state,author,updatedAt,headRefName",
     ]);
     for arg in args {
         cmd.arg(arg);
@@ -367,13 +367,11 @@ fn format_pr_list(json: &Value) -> String {
             let state = pr["state"].as_str().unwrap_or("???");
             let author = pr["author"]["login"].as_str().unwrap_or("???");
             let icon = state_icon(state);
-            format!(
-                "  {} #{} {} ({})",
-                icon,
-                number,
-                truncate(title, 60),
-                author
-            )
+            let branch = match pr["headRefName"].as_str() {
+                Some(branch) if !branch.is_empty() => format!(" [{branch}]"),
+                _ => String::new(),
+            };
+            format!("  {} #{} {}{} ({})", icon, number, title, branch, author)
         })
         .collect();
     const MAX_LIST: usize = CAP_LIST;
@@ -604,20 +602,23 @@ fn format_pr_checks(stdout: &str) -> String {
     out.push_str("CI Checks Summary:\n");
     out.push_str(&format!("  [ok] Passed: {}\n", passed));
     out.push_str(&format!("  [FAIL] Failed: {}\n", failed));
-    if pending > 0 {
-        out.push_str(&format!("  [pending] Pending: {}\n", pending));
-    }
+    out.push_str(&format!("  [pending] Pending: {}\n", pending));
     if other > 0 {
         out.push_str(&format!("  [skip] Skipped/cancelled: {}\n", other));
     }
-    let failed_checks = checks
-        .iter()
-        .filter(|check| check.2 == PrCheckStatus::Failed)
-        .map(|check| check.3.as_str());
-    if failed > 0 {
-        out.push_str("\n  Failed checks:\n");
-        for check in failed_checks {
-            out.push_str(&format!("    {}\n", check));
+    // Every check by name and state; a failed one keeps gh's whole row, link included.
+    if !checks.is_empty() {
+        out.push_str("Checks:\n");
+    }
+    for (name, _, status, row) in &checks {
+        match status {
+            PrCheckStatus::Passed => out.push_str(&format!("  [ok] {}\n", name)),
+            PrCheckStatus::Failed => out.push_str(&format!("  [FAIL] {}\n", row)),
+            PrCheckStatus::Pending => out.push_str(&format!("  [pending] {}\n", name)),
+            PrCheckStatus::Other => {
+                let state = row.split('\t').nth(1).unwrap_or_default().trim();
+                out.push_str(&format!("  [skip] {} ({})\n", name, state));
+            }
         }
     }
     out
@@ -866,7 +867,7 @@ fn list_runs(args: &[String], _verbose: u8) -> Result<i32> {
         "run",
         "list",
         "--json",
-        "databaseId,name,status,conclusion,createdAt",
+        "databaseId,name,status,conclusion,createdAt,headBranch,event,displayTitle",
     ]);
     cmd.arg("--limit").arg("10");
     for arg in args {
@@ -894,7 +895,22 @@ fn format_run_list(json: &Value) -> String {
             _ if status == "in_progress" => "[time]",
             _ => "[pending]",
         };
-        out.push_str(&format!("  {} {} [{}]\n", icon, truncate(name, 50), id));
+        let mut line = format!("  {} {} [{}]", icon, name, id);
+        if let Some(branch) = run["headBranch"].as_str().filter(|b| !b.is_empty()) {
+            line.push_str(&format!(" {}", branch));
+        }
+        if let Some(event) = run["event"].as_str().filter(|e| !e.is_empty()) {
+            line.push_str(&format!(" ({})", event));
+        }
+        // The commit or PR title; a manual dispatch titles the run with its workflow name.
+        if let Some(title) = run["displayTitle"]
+            .as_str()
+            .filter(|t| !t.is_empty() && *t != name)
+        {
+            line.push_str(&format!(" {}", title));
+        }
+        out.push_str(&line);
+        out.push('\n');
     }
     out
 }
@@ -944,27 +960,37 @@ fn view_run(args: &[String], _verbose: u8) -> Result<i32> {
 
 fn format_run_view(stdout: &str, run_id: &str) -> String {
     let mut out = String::new();
-    let mut in_jobs = false;
-
     if run_id.is_empty() {
         out.push_str("Workflow Run\n");
     } else {
         out.push_str(&format!("Workflow Run #{}\n", run_id));
     }
+
+    // gh prints the run's title and trigger, a JOBS list (each job's steps indented
+    // under it), then ANNOTATIONS as pairs of a message and the job/location it belongs
+    // to. Kept: the title and trigger, every job's result, the steps that did not
+    // succeed or get skipped, error and warning annotations, and gh's own hints. Dropped:
+    // passing and skipped steps, notice annotations, blank lines and the web URL.
+    let mut skip_annotation_location = false;
     for line in stdout.lines() {
-        if line.contains("JOBS") {
-            in_jobs = true;
+        let trimmed = line.trim();
+        if std::mem::take(&mut skip_annotation_location) || trimmed.is_empty() {
+            continue;
         }
-        if in_jobs {
-            if line.contains('✓') || line.contains("success") {
-                continue;
-            }
-            if line.contains("[x]") || line.contains("fail") {
-                out.push_str(&format!("  [FAIL] {}\n", line.trim()));
-            }
-        } else if line.contains("Status:") || line.contains("Conclusion:") {
-            out.push_str(&format!("  {}\n", line.trim()));
+        if trimmed.starts_with("View this run on GitHub:") {
+            continue;
         }
+        let is_step = line.starts_with("  ");
+        if is_step && (trimmed.starts_with('✓') || trimmed.starts_with("- ")) {
+            continue;
+        }
+        // A notice annotation (`- message`) and the location line after it.
+        if !is_step && trimmed.starts_with("- ") {
+            skip_annotation_location = true;
+            continue;
+        }
+        out.push_str(line);
+        out.push('\n');
     }
     out
 }
@@ -1282,7 +1308,7 @@ mod tests {
 
         assert!(result.contains("Passed: 1"));
         assert!(result.contains("Failed: 1"));
-        assert!(!result.contains("Pending:"));
+        assert!(result.contains("Pending: 0"));
         assert!(result.contains("Unit tests\tfail"));
     }
 
@@ -1317,7 +1343,7 @@ mod tests {
         let result = format_pr_checks(output);
 
         assert!(result.contains("Passed: 3"), "got:\n{result}");
-        assert!(!result.contains("Pending:"), "got:\n{result}");
+        assert!(result.contains("Pending: 0"), "got:\n{result}");
     }
 
     #[test]
@@ -1365,6 +1391,85 @@ mod tests {
     #[test]
     fn test_run_view_no_passthrough_empty() {
         assert!(!should_passthrough_run_view(&[]));
+    }
+
+    // Captured from gh 2.89 (`gh run view <id>`, `gh pr checks <n>`) as gh prints them
+    // to a pipe, and the JSON gh returns for the fields `rtk gh run list` / `pr list`
+    // request, rebuilt from the same captures. Owner names sanitized.
+    const RUN_VIEW_FAILED: &str =
+        include_str!("../../../tests/fixtures/gh_run_view_failed_job.txt");
+    const PR_CHECKS_ALL_PASS: &str =
+        include_str!("../../../tests/fixtures/gh_pr_checks_all_pass.txt");
+    const RUN_LIST_JSON: &str = include_str!("../../../tests/fixtures/gh_run_list_raw.json");
+    const PR_LIST_JSON: &str = include_str!("../../../tests/fixtures/gh_pr_list_raw.json");
+
+    #[test]
+    fn run_view_keeps_the_failed_job_and_step_and_every_job_result() {
+        let out = format_run_view(RUN_VIEW_FAILED, "45516177094");
+        for kept in [
+            "X memory (macos-latest, osx_arm64) in 4m11s",
+            r#"X Run MEMORY_EXT_DIR="$RUNNER_TEMP/ext" go test ./cmd/memory/..."#,
+            "✓ memory (ubuntu-latest, linux_amd64)",
+            "✓ test (macos-latest)",
+            "✓ test (ubuntu-latest)",
+            "X Process completed with exit code 1.",
+            "Triggered via pull_request",
+        ] {
+            assert!(out.contains(kept), "missing {kept:?}:\n{out}");
+        }
+        assert!(!out.contains("✓ Set up job"), "{out}");
+        assert!(!out.contains("Due to capacity constraints"), "{out}");
+        assert!(out.len() * 100 <= RUN_VIEW_FAILED.len() * 80, "{out}");
+    }
+
+    #[test]
+    fn pr_checks_lists_each_check_and_the_pending_count() {
+        let out = format_pr_checks(PR_CHECKS_ALL_PASS);
+        assert!(out.contains("Passed: 7"), "{out}");
+        assert!(out.contains("Pending: 0"), "{out}");
+        for name in [
+            "govulncheck",
+            "memory (macos-latest, osx_arm64)",
+            "memory (ubuntu-latest, linux_amd64)",
+            "test (macos-latest)",
+            "test (ubuntu-latest)",
+        ] {
+            assert!(
+                out.contains(&format!("[ok] {name}\n")),
+                "missing {name}:\n{out}"
+            );
+        }
+        assert!(out.len() * 100 <= PR_CHECKS_ALL_PASS.len() * 80, "{out}");
+    }
+
+    #[test]
+    fn run_list_keeps_branch_event_and_full_title() {
+        let json: Value = serde_json::from_str(RUN_LIST_JSON).unwrap();
+        let out = format_run_list(&json);
+        assert!(
+            out.contains("[ok] autorelease [45589400628] main (push) fix(guardrails): close gaps found by a 10,705-case mutation test (#85)"),
+            "{out}"
+        );
+        assert!(
+            out.contains("[ok] changelog [45588520319] fix/guard-mutation-gaps (pull_request)"),
+            "{out}"
+        );
+    }
+
+    #[test]
+    fn pr_list_keeps_branch_and_full_title() {
+        let json: Value = serde_json::from_str(PR_LIST_JSON).unwrap();
+        let out = format_pr_list(&json);
+        assert!(
+            out.contains("#84 ci: one changelog entry file per pull request instead of a shared Unreleased section [ci/changelog-fragments]"),
+            "{out}"
+        );
+        assert!(
+            out.contains(
+                "#80 chore(deps): Bump github/codeql-action/upload-sarif from 4.39.3 to 4.39.4"
+            ),
+            "{out}"
+        );
     }
 
     #[test]

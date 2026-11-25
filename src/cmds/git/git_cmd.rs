@@ -1548,6 +1548,9 @@ const DEFAULT_LOG_LIMIT_ARG: &str = "-10";
 const COMPACT_LOG_LIMIT: usize = 50;
 /// The width a log line is cut to when RTK set the limit.
 const LOG_LINE_WIDTH: usize = 80;
+/// Up to this many commits asked for with `-N`, `git log` keeps every body line whole: a
+/// count that small is asking about those commits, and their bodies are the answer.
+const FULL_BODY_LOG_LIMIT: usize = 20;
 
 /// True when `exit_code` says git refused the command rather than ran it, which owes the user
 /// nothing beyond git's own error. A negative code is a git that crashed: Windows reports the
@@ -2548,8 +2551,7 @@ fn run_log(
     // A format the user chose is shown line by line, each line cut to width. Every line of the
     // walk is cut once: the first `limit` are printed, and the rest are stored if the walk
     // turns out to be cut.
-    let user_lines: Option<Vec<String>> =
-        has_format_flag.then(|| format_user_log_lines(shown_raw, log_line_width(user_set_limit)));
+    let user_lines: Option<Vec<String>> = has_format_flag.then(|| format_user_log_lines(shown_raw));
 
     // Post-process: truncate long messages, cap lines only if RTK set the default
     let filtered = match &user_lines {
@@ -2888,10 +2890,11 @@ fn log_line_width(user_set_limit: bool) -> usize {
     if user_set_limit { 120 } else { LOG_LINE_WIDTH }
 }
 
-/// The lines of a user-chosen format as they are shown: each cut to `width`. The one place the
-/// shown form of such a line is defined, so the recall store and the display cannot differ.
-fn format_user_log_lines(output: &str, width: usize) -> Vec<String> {
-    output.lines().map(|l| truncate_line(l, width)).collect()
+/// The lines of a user-chosen format as they are shown: whole, since the user chose what each
+/// line carries, and cutting one dropped the end of a subject. The one place the shown form of
+/// such a line is defined, so the recall store and the display cannot differ.
+fn format_user_log_lines(output: &str) -> Vec<String> {
+    output.lines().map(str::to_string).collect()
 }
 
 /// The lines of a user-chosen format that are printed: all of them under a count the user set,
@@ -2922,29 +2925,44 @@ pub(crate) fn filter_log_output(output: &str, limit: usize, user_set_limit: bool
             continue;
         }
         let mut lines = block.lines();
-        // First line is the header: hash subject (date) <author>
+        // First line is the header: hash subject (date) <author>, never cut.
         let header = match lines.next() {
-            Some(h) => truncate_line(h.trim(), truncate_width),
+            Some(h) => h.trim().to_string(),
             None => continue,
         };
-        // Remaining lines are the body — keep up to 3 non-empty, non-trailer lines
+        // Remaining lines are the body — non-empty, non-trailer lines: all of them, whole,
+        // under a small count the user set; up to 3, each cut to width, otherwise.
         let all_body_lines: Vec<&str> = lines
-            .map(|l| l.trim())
+            .map(|l| l.trim_end())
             .filter(|l| {
+                let l = l.trim_start();
                 !l.is_empty()
                     && !l.starts_with("Signed-off-by:")
                     && !l.starts_with("Co-authored-by:")
             })
             .collect();
-        let body_omitted = all_body_lines.len().saturating_sub(3);
-        let body_lines = &all_body_lines[..all_body_lines.len().min(3)];
+        let whole_bodies = user_set_limit && limit <= FULL_BODY_LOG_LIMIT;
+        let max_body = if whole_bodies { usize::MAX } else { 3 };
+        let body_omitted = all_body_lines.len().saturating_sub(max_body);
+        let body_lines = &all_body_lines[..all_body_lines.len().min(max_body)];
 
         if body_lines.is_empty() {
             result.push(header);
         } else {
             let mut entry = header;
-            for body in body_lines {
-                entry.push_str(&format!("\n  {}", truncate_line(body, truncate_width)));
+            if whole_bodies {
+                // As git wrote it, with a blank line closing the commit: indenting every
+                // line would cost more than the RTK-format log it was cut from.
+                for body in body_lines {
+                    entry.push('\n');
+                    entry.push_str(body);
+                }
+                entry.push('\n');
+            } else {
+                for body in body_lines {
+                    let body = truncate_line(body.trim_start(), truncate_width);
+                    entry.push_str(&format!("\n  {}", body));
+                }
             }
             if body_omitted > 0 {
                 entry.push_str(&format!("\n  [+{} lines omitted]", body_omitted));
@@ -3097,6 +3115,30 @@ fn extract_state_header(raw: &str) -> Option<String> {
     None
 }
 
+/// Git's advice under its `Your branch ...` line in plain `git status`, which porcelain
+/// drops: `(use "git branch --unset-upstream" to fixup)` for an upstream that is gone. The
+/// push and pull hints are left out, since `ahead N`/`behind N` already says as much.
+fn extract_branch_advice(raw: &str) -> Vec<String> {
+    let mut advice = Vec::new();
+    let mut under_branch_line = false;
+    for line in raw.lines() {
+        let stripped = line.trim();
+        if stripped.starts_with("Your branch ") {
+            under_branch_line = true;
+        } else if under_branch_line && stripped.starts_with('(') {
+            let generic = ["\"git push\"", "\"git pull\""]
+                .iter()
+                .any(|hint| stripped.contains(hint));
+            if stripped.contains("\"git ") && !generic {
+                advice.push(stripped.to_string());
+            }
+        } else {
+            under_branch_line = false;
+        }
+    }
+    advice
+}
+
 /// Porcelain `-b` collapses a detached HEAD to the opaque `## HEAD (no branch)`, which can be
 /// misread as a branch literally named `HEAD`. Extracts the explicit
 /// `HEAD detached at/from <ref>` line from plain `git status` output instead. `None` if HEAD
@@ -3219,6 +3261,14 @@ fn run_status(args: &[String], verbose: u8, global_args: &[String]) -> Result<i3
     // Surface in-progress state (rebase/merge/cherry-pick/bisect/am) from the
     // plain-status output we already captured for tracking. Porcelain omits it
     // and hiding it misleads the user about the true repo state.
+    // Git's advice about the branch's upstream goes under the branch line it is about.
+    let advice = extract_branch_advice(&raw_output).join("\n");
+    let formatted = match (advice.is_empty(), formatted.split_once('\n')) {
+        (true, _) => formatted,
+        (false, Some((branch, rest))) => format!("{branch}\n{advice}\n{rest}"),
+        (false, None) => format!("{formatted}\n{advice}"),
+    };
+
     let final_output = match extract_state_header(&raw_output) {
         Some(state) => format!("{}\n{}", state, formatted),
         None => formatted,
@@ -3920,6 +3970,7 @@ fn filter_branch_output(output: &str) -> String {
     let mut local: Vec<String> = Vec::new();
     let mut remote: Vec<String> = Vec::new();
     let mut seen_remote: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut remote_heads: Vec<String> = Vec::new();
 
     for line in output.lines() {
         let line = line.trim();
@@ -3933,6 +3984,8 @@ fn filter_branch_output(output: &str) -> String {
             if let Some(slash_pos) = rest.find('/') {
                 let branch = &rest[slash_pos + 1..];
                 if branch.starts_with("HEAD ") {
+                    // `origin/HEAD -> origin/main`: the remote's default branch.
+                    remote_heads.push(rest.to_string());
                     continue;
                 }
                 if seen_remote.insert(branch.to_string()) {
@@ -3954,9 +4007,15 @@ fn filter_branch_output(output: &str) -> String {
     }
 
     if !remote.is_empty() {
+        // `+ name` is a local branch checked out in another worktree.
+        let is_local = |name: &String| {
+            local
+                .iter()
+                .any(|l| l.strip_prefix("+ ").unwrap_or(l) == name)
+        };
         let remote_only: Vec<&String> = remote
             .iter()
-            .filter(|r| *r != &current && !local.contains(r))
+            .filter(|r| *r != &current && !is_local(r))
             .collect();
         if !remote_only.is_empty() {
             const MAX_REMOTE_BRANCHES: usize = CAP_WARNINGS;
@@ -3971,6 +4030,9 @@ fn filter_branch_output(output: &str) -> String {
                 ));
             }
         }
+    }
+    for head in &remote_heads {
+        result.push(format!("  {}", head));
     }
 
     result.join("\n")
@@ -5871,6 +5933,73 @@ mod tests {
         );
     }
 
+    // `git log -12` from the A/B sample, rebuilt in RTK's own log format (author and
+    // home paths sanitized).
+    const LOG_12_RTK_FORMAT: &str =
+        include_str!("../../../tests/fixtures/git_log_rtk_format_12_raw.txt");
+
+    #[test]
+    fn log_with_a_small_count_keeps_whole_bodies_and_subjects() {
+        let out = filter_log_output(LOG_12_RTK_FORMAT, 12, true);
+        assert!(!out.contains("lines omitted]"), "{out}");
+        assert!(!out.contains(LOG_ENTRY_MARKER), "{out}");
+        assert!(
+            crate::core::tracking::estimate_tokens(&out)
+                < crate::core::tracking::estimate_tokens(LOG_12_RTK_FORMAT),
+            "must stay under the log it was cut from, or the raw form is printed:\n{out}"
+        );
+        for kept in [
+            "b78d3cd fix(guardrails): let dry-run pushes, help requests, shell -n and in-tree find -delete pass (8 hours ago) <example>",
+            "Function bodies are now walked again at most 64 times per parse, and a",
+            "- git-push-delete (git family): git push --delete, -d, or :branch.",
+            "Pull requests now add changelog.d/<branch>.md. The release's stamp step",
+        ] {
+            assert!(out.contains(kept), "missing {kept:?}:\n{out}");
+        }
+        // The default walk, with no count from the user, still keeps bodies short.
+        let out = filter_log_output(LOG_12_RTK_FORMAT, 10, false);
+        assert!(out.contains("lines omitted]"), "{out}");
+    }
+
+    #[test]
+    fn user_format_log_lines_keep_the_whole_subject() {
+        let output = "c142c14 example 2026-11-25 Rewrite the README around findings, split detail into docs/, add charts and pipeline results on the site\n";
+        let lines = format_user_log_lines(output);
+        assert_eq!(lines, vec![output.trim_end().to_string()]);
+    }
+
+    #[test]
+    fn branch_listing_keeps_origin_head_and_worktree_branches_are_local() {
+        let output = "+ ci/changelog-fragments\n  ci/changelog-unreleased\n* fix/guard-mutation-gaps\n\
+                      + main\n  remotes/origin/HEAD -> origin/main\n  remotes/origin/main\n";
+        let out = filter_branch_output(output);
+        assert!(out.contains("origin/HEAD -> origin/main"), "{out}");
+        assert!(out.contains("  + main"), "{out}");
+        assert!(
+            !out.contains("remote-only"),
+            "main is local, checked out elsewhere:\n{out}"
+        );
+    }
+
+    #[test]
+    fn status_keeps_git_advice_about_the_upstream() {
+        let raw = "On branch fix/guard-mutation-gaps\n\
+                   Your branch is based on 'origin/fix/guard-mutation-gaps', but the upstream is gone.\n\
+                   \x20 (use \"git branch --unset-upstream\" to fixup)\n\
+                   \n\
+                   Changes not staged for commit:\n\
+                   \x20 (use \"git add <file>...\" to update what will be committed)\n\
+                   \tmodified:   cmd/guardrails/rmguard_test.go\n";
+        assert_eq!(
+            extract_branch_advice(raw),
+            vec![r#"(use "git branch --unset-upstream" to fixup)"#.to_string()]
+        );
+        // The push/pull hints restate what `ahead N`/`behind N` already says.
+        let ahead = "On branch main\nYour branch is ahead of 'origin/main' by 2 commits.\n\
+                     \x20 (use \"git push\" to publish your local commits)\n\nnothing to commit\n";
+        assert!(extract_branch_advice(ahead).is_empty());
+    }
+
     #[test]
     fn test_filter_branch_output() {
         let output = "* main\n  feature/auth\n  fix/bug-123\n  remotes/origin/HEAD -> origin/main\n  remotes/origin/main\n  remotes/origin/feature/auth\n  remotes/origin/release/v2\n";
@@ -6265,12 +6394,10 @@ A  added.rs
     }
 
     #[test]
-    fn test_filter_log_output_truncate_long() {
+    fn test_filter_log_output_never_cuts_the_header() {
         let long_line = "abc1234 ".to_string() + &"x".repeat(100) + " (2 days ago) <author>";
-        let result = filter_log_output(&long_line, 10, false);
-        assert!(result.chars().count() < long_line.chars().count());
-        assert!(result.contains("..."));
-        assert!(result.chars().count() <= 80);
+        assert_eq!(filter_log_output(&long_line, 10, false), long_line);
+        assert_eq!(filter_log_output(&long_line, 10, true), long_line);
     }
 
     #[test]
@@ -6299,25 +6426,20 @@ A  added.rs
     }
 
     #[test]
-    fn test_filter_log_output_user_limit_wider_truncation() {
-        // When user explicitly passes -N, lines up to 120 chars should NOT be truncated
-        let line_90_chars = format!("abc1234 {} (2 days ago) <author>", "x".repeat(60));
-        assert!(line_90_chars.chars().count() > 80);
-        assert!(line_90_chars.chars().count() < 120);
+    fn test_filter_log_output_body_width_follows_the_count() {
+        let body_200_chars = "y".repeat(200);
+        let block = format!("abc1234 subject (2 days ago) <author>\n{body_200_chars}\n---END---");
 
-        let result_default = filter_log_output(&line_90_chars, 10, false);
-        let result_user = filter_log_output(&line_90_chars, 10, true);
-
-        // Default truncates at 80 chars
-        assert!(
-            result_default.contains("..."),
-            "Default should truncate at 80 chars"
-        );
-        // User-set limit uses wider threshold (120 chars)
-        assert!(
-            !result_user.contains("..."),
-            "User limit should not truncate 90-char line"
-        );
+        // RTK's default walk cuts a body line at 80 chars.
+        let result_default = filter_log_output(&block, 10, false);
+        assert!(result_default.contains("..."), "{result_default}");
+        // A small count from the user keeps it whole.
+        let result_user = filter_log_output(&block, 10, true);
+        assert!(result_user.contains(&body_200_chars), "{result_user}");
+        // A large one cuts it at the wider 120.
+        let result_large = filter_log_output(&block, 50, true);
+        assert!(result_large.contains(&"y".repeat(117)), "{result_large}");
+        assert!(!result_large.contains(&"y".repeat(118)), "{result_large}");
     }
 
     #[test]
@@ -7665,13 +7787,12 @@ A  added.rs
     }
 
     #[test]
-    fn user_format_lines_are_cut_to_width_and_shown_up_to_the_limit() {
+    fn user_format_lines_are_kept_whole_and_shown_up_to_the_limit() {
         let long = format!("    {}", "word ".repeat(30));
         let output = format!("commit abc\n{long}\nAuthor: t\ncommit def\n{long}\n");
-        let stored = format_user_log_lines(&output, LOG_LINE_WIDTH);
+        let stored = format_user_log_lines(&output);
         assert_eq!(stored.len(), 5);
-        assert!(stored.iter().all(|l| l.chars().count() <= LOG_LINE_WIDTH));
-        assert!(stored[1].ends_with("..."), "{:?}", stored[1]);
+        assert_eq!(stored[1], long);
         assert_eq!(shown_user_log_lines(&stored, 3, false), &stored[..3]);
         assert_eq!(shown_user_log_lines(&stored, 3, true), &stored[..]);
     }
@@ -7982,7 +8103,7 @@ no changes added to commit (use "git add" and/or "git commit -a")
                               jkl3456 docs: update readme\n\
                               mno7890 test: add tests\n";
 
-        let lines = format_user_log_lines(oneline_output, LOG_LINE_WIDTH);
+        let lines = format_user_log_lines(oneline_output);
         let result = shown_user_log_lines(&lines, 10, false).join("\n");
         // All 5 lines must survive — no ---END--- splitting
         assert_eq!(result.lines().count(), 5);
@@ -7999,7 +8120,7 @@ no changes added to commit (use "git add" and/or "git commit -a")
                               mno7890 test: add tests\n";
 
         // user_set_limit=true means respect all lines (no cap)
-        let lines = format_user_log_lines(oneline_output, LOG_LINE_WIDTH);
+        let lines = format_user_log_lines(oneline_output);
         let result = shown_user_log_lines(&lines, 3, true);
         assert_eq!(result.len(), 5);
 

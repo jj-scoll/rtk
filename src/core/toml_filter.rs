@@ -88,6 +88,8 @@ struct TomlFilterFile {
 struct TomlFilterDef {
     description: Option<String>,
     match_command: String,
+    /// Output of at most this many bytes is passed through whole, before any stage runs.
+    passthrough_max_bytes: Option<usize>,
     #[serde(default)]
     strip_ansi: bool,
     /// Regex substitutions, applied line-by-line before match_output (stage 2).
@@ -143,6 +145,7 @@ pub struct CompiledFilter {
     #[allow(dead_code)]
     pub description: Option<String>,
     match_regex: Regex,
+    passthrough_max_bytes: Option<usize>,
     strip_ansi: bool,
     replace: Vec<CompiledReplaceRule>,
     match_output: Vec<CompiledMatchOutputRule>,
@@ -396,6 +399,7 @@ fn compile_filter(name: String, def: TomlFilterDef) -> Result<CompiledFilter, St
         name,
         description: def.description,
         match_regex,
+        passthrough_max_bytes: def.passthrough_max_bytes,
         strip_ansi: def.strip_ansi,
         replace,
         match_output,
@@ -622,6 +626,18 @@ pub enum Lossiness {
 }
 
 pub fn apply_filter_with_info(filter: &CompiledFilter, stdout: &str) -> (String, Lossiness) {
+    // 0. passthrough_max_bytes — output this small is shown whole, in the line form
+    //    every other path returns.
+    if filter
+        .passthrough_max_bytes
+        .is_some_and(|max| stdout.len() <= max)
+    {
+        return (
+            stdout.lines().collect::<Vec<_>>().join("\n"),
+            Lossiness::None,
+        );
+    }
+
     let mut lines: Vec<String> = stdout.lines().map(String::from).collect();
 
     // 1. strip_ansi
@@ -974,6 +990,33 @@ mod tests {
             .into_iter()
             .next()
             .expect("expected at least one filter")
+    }
+
+    #[test]
+    fn passthrough_max_bytes_leaves_small_output_whole_and_filters_larger() {
+        let toml = "schema_version = 1\n[filters.f]\nmatch_command = \"^cmd\"\n\
+                    passthrough_max_bytes = 12\nmax_lines = 1\nstrip_lines_matching = [\"^b$\"]\n";
+        let filter = first_filter(toml);
+        let (out, loss) = apply_filter_with_info(&filter, "a\nb\nc\n");
+        assert_eq!(out, "a\nb\nc");
+        assert_eq!(loss, Lossiness::None);
+        let (out, loss) = apply_filter_with_info(&filter, "a\nb\nc\nd\ne\nf\ng\n");
+        assert!(out.starts_with("a\n... ("), "{out}");
+        assert_ne!(loss, Lossiness::None);
+    }
+
+    /// `jq . results/ec2-postgres.json` from the A/B sample: 21 KB, and the
+    /// questions asked of it needed fields past line 40.
+    #[test]
+    fn jq_passes_a_mid_sized_result_through_whole() {
+        let raw = include_str!("../../tests/fixtures/jq_benchmark_results.json");
+        let jq = make_filters(BUILTIN_TOML)
+            .into_iter()
+            .find(|f| f.name == "jq")
+            .expect("built-in jq filter");
+        let (out, loss) = apply_filter_with_info(&jq, raw);
+        assert_eq!(out, raw.trim_end_matches('\n'));
+        assert_eq!(loss, Lossiness::None);
     }
 
     #[test]

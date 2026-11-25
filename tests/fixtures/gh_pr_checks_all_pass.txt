@@ -1,0 +1,7 @@
+changelog	pass	5s	https://github.com/example/broodhall/actions/runs/45588520319/job/139116238651	
+context-guard	pass	12s	https://github.com/example/broodhall/actions/runs/45588520298/job/139116239328	
+govulncheck	pass	25s	https://github.com/example/broodhall/actions/runs/45588520298/job/139116239717	
+memory (macos-latest, osx_arm64)	pass	3m14s	https://github.com/example/broodhall/actions/runs/45588520298/job/139116239728	
+memory (ubuntu-latest, linux_amd64)	pass	3m44s	https://github.com/example/broodhall/actions/runs/45588520298/job/139116239821	
+test (macos-latest)	pass	4m2s	https://github.com/example/broodhall/actions/runs/45588520298/job/139116239781	
+test (ubuntu-latest)	pass	3m11s	https://github.com/example/broodhall/actions/runs/45588520298/job/139116239707	

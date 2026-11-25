@@ -7,7 +7,6 @@ use crate::core::guard::never_worse;
 use crate::core::runner::{self, RunOptions};
 use crate::core::shell::display_args;
 use crate::core::tracking::estimate_tokens;
-use crate::core::truncate::CAP_INVENTORY;
 use crate::core::utils::{ChildArgExt, resolved_command};
 use anyhow::Result;
 use regex::Regex;
@@ -420,17 +419,6 @@ fn hidden_hint(truncated: &[String], filtered: &[String]) -> Option<String> {
     }
 }
 
-/// Format bytes into human-readable size
-fn human_size(bytes: u64) -> String {
-    if bytes >= 1_048_576 {
-        format!("{:.1}M", bytes as f64 / 1_048_576.0)
-    } else if bytes >= 1024 {
-        format!("{:.1}K", bytes as f64 / 1024.0)
-    } else {
-        format!("{}B", bytes)
-    }
-}
-
 /// Parse a single `ls -la` line, returning `(file_type_char, perms, size, name)`.
 ///
 /// `perms` is the raw 10-char string from ls (e.g. `-rw-r--r--`); use
@@ -519,6 +507,32 @@ fn perms_to_octal(perms: &str) -> Option<String> {
     }
 }
 
+/// Display budget for one listing, in bytes: about 2,000 tokens by RTK's bytes/4
+/// estimate. A budget rather than an entry count, so a recursive listing of short names
+/// is shown whole while a huge one is still cut, recoverably.
+const LS_BYTE_BUDGET: usize = 8 * 1024;
+
+/// The modification time as ls printed it (`Nov 25 03:59`, `Apr 21  2026`), runs of
+/// spaces collapsed.
+fn ls_mtime(line: &str) -> Option<String> {
+    let date = LS_DATE_RE.find(line)?.as_str();
+    Some(date.split_whitespace().collect::<Vec<_>>().join(" "))
+}
+
+/// A directory heading in recursive or multi-directory output (`path:`).
+fn ls_heading(line: &str) -> Option<&str> {
+    line.strip_suffix(':').filter(|path| !path.is_empty())
+}
+
+/// One directory's worth of listing: its heading (none for the entries ls prints
+/// before any heading), then its directories and its other entries.
+#[derive(Default)]
+struct LsSection {
+    heading: Option<String>,
+    dirs: Vec<String>,
+    files: Vec<String>,
+}
+
 /// Parse ls -la output into compact format.
 ///
 /// Without `show_long`:
@@ -526,36 +540,49 @@ fn perms_to_octal(perms: &str) -> Option<String> {
 ///   name         (files)
 ///
 /// With `show_long` (user passed `-l`):
-///   755  name/        (dirs)
-///   644  name  size   (files)
+///   755  name/  Nov 25 04:42            (dirs)
+///   644  name  7316  Nov 25 03:03       (files: exact bytes, mtime as ls prints it)
+///
+/// Recursive and multi-directory output keeps each `path:` heading over that
+/// directory's entries; a noise directory's own section is dropped with it.
 ///
 /// Returns (entries, parsed_count, truncated, filtered) so caller can emit
 /// a recovery hint when anything was dropped.
 /// parsed_count tracks how many non-header lines were successfully parsed.
-/// truncated holds compact lines beyond the CAP_INVENTORY display cap.
+/// truncated holds compact lines beyond the LS_BYTE_BUDGET display budget.
 /// filtered holds the display name of each entry RTK removed from view
-/// (noise dirs without -a/-A as `name/`, plus raw unparsable non-dotdir
-/// lines).
+/// (noise dirs without -a/-A as `name/`, the entries of a noise dir's own section as
+/// `path/name`, plus raw unparsable non-dotdir lines).
 /// If parsed_count == 0 but raw had content, caller should fall back to raw output.
 fn compact_ls(
     raw: &str,
     show_all: bool,
     show_long: bool,
 ) -> (String, usize, Vec<String>, Vec<String>) {
-    let mut dirs: Vec<(String, Option<String>)> = Vec::new(); // (name, octal_perms)
-    let mut files: Vec<(String, String, Option<String>)> = Vec::new(); // (name, size, octal_perms)
+    let mut sections: Vec<LsSection> = vec![LsSection::default()];
+    let mut noise_section = false;
+    let mut entry_count: usize = 0;
     let mut lines_seen: usize = 0;
     let mut parsed_count: usize = 0;
     let mut dotdirs: usize = 0;
     let mut filtered: Vec<String> = Vec::new();
+    let is_noise = |name: &str| NOISE_DIRS.contains(&name);
 
     for line in raw.lines() {
         if line.starts_with("total ") || line.is_empty() {
             continue;
         }
-        lines_seen += 1;
 
         let Some((file_type, perms, size, name)) = parse_ls_line(line) else {
+            if let Some(path) = ls_heading(line) {
+                noise_section = !show_all && path.split('/').any(is_noise);
+                sections.push(LsSection {
+                    heading: Some(path.to_string()),
+                    ..LsSection::default()
+                });
+                continue;
+            }
+            lines_seen += 1;
             if is_dotdir(line) {
                 dotdirs += 1;
             } else {
@@ -563,32 +590,47 @@ fn compact_ls(
             }
             continue;
         };
+        lines_seen += 1;
         parsed_count += 1;
+        let section = sections.last_mut().expect("sections starts non-empty");
 
+        if noise_section {
+            let path = section.heading.as_deref().unwrap_or_default();
+            filtered.push(format!("{}/{}", path, name));
+            continue;
+        }
         // Filter noise dirs unless dotfiles were requested; every entry the
         // child printed and RTK drops is recorded so the hint can recover it.
-        if !show_all && NOISE_DIRS.iter().any(|noise| name == *noise) {
+        if !show_all && is_noise(&name) {
             filtered.push(format!("{}/", name));
             continue;
         }
 
-        // Only parse perms when the user actually wants the long listing —
-        // skip the work otherwise.
-        let octal = if show_long {
-            perms_to_octal(&perms)
-        } else {
-            None
-        };
-
+        entry_count += 1;
+        let mut shown = String::new();
+        if show_long && let Some(octal) = perms_to_octal(&perms) {
+            shown.push_str(&octal);
+            shown.push_str("  ");
+        }
+        shown.push_str(&name);
         if file_type == 'd' {
-            dirs.push((name, octal));
-        } else {
+            shown.push('/');
+        } else if show_long {
             // Regular files, symlinks, character/block devices, pipes, sockets
-            files.push((name, human_size(size), octal));
+            shown.push_str(&format!("  {}", size));
+        }
+        if show_long && let Some(mtime) = ls_mtime(line) {
+            shown.push_str("  ");
+            shown.push_str(&mtime);
+        }
+        if file_type == 'd' {
+            section.dirs.push(shown);
+        } else {
+            section.files.push(shown);
         }
     }
 
-    if dirs.is_empty() && files.is_empty() {
+    if entry_count == 0 {
         if lines_seen > 0 && parsed_count == 0 {
             if dotdirs == lines_seen {
                 // Only . and .. entries (empty directory)
@@ -602,28 +644,29 @@ fn compact_ls(
         return ("(empty)\n".to_string(), parsed_count, Vec::new(), filtered);
     }
 
-    // Dirs first, then files — one compact line each
-    let mut all_lines: Vec<String> = Vec::with_capacity(dirs.len() + files.len());
-    for (name, octal) in &dirs {
-        all_lines.push(match octal {
-            Some(octal) => format!("{}  {}/", octal, name),
-            None => format!("{}/", name),
-        });
-    }
-    for (name, size, octal) in &files {
-        all_lines.push(match (show_long, octal) {
-            (false, _) => name.clone(),
-            (true, Some(octal)) => format!("{}  {}  {}", octal, name, size),
-            (true, None) => format!("{}  {}", name, size),
-        });
+    // Per directory: its heading, then dirs first, then files — one compact line each.
+    let mut all_lines: Vec<String> = Vec::new();
+    for section in sections {
+        if let Some(heading) = &section.heading {
+            if !show_all && heading.split('/').any(is_noise) {
+                continue;
+            }
+            all_lines.push(format!("{}:", heading));
+        }
+        all_lines.extend(section.dirs);
+        all_lines.extend(section.files);
     }
 
     // Cap the displayed listing; the rest is recoverable via the tee hint.
-    let truncated = if all_lines.len() > CAP_INVENTORY {
-        all_lines.split_off(CAP_INVENTORY)
-    } else {
-        Vec::new()
-    };
+    let mut used = 0;
+    let shown = all_lines
+        .iter()
+        .take_while(|line| {
+            used += line.len() + 1;
+            used <= LS_BYTE_BUDGET
+        })
+        .count();
+    let truncated = all_lines.split_off(shown);
 
     let mut entries = String::new();
     for line in &all_lines {
@@ -984,22 +1027,98 @@ mod tests {
         );
     }
 
+    // `ls -l -R`, `ls -la` and `ls -lR` as RTK's child prints them (owner sanitized,
+    // the recursive one trimmed to the sections the tests read).
+    const RECURSIVE_LONG: &str = include_str!("../../../tests/fixtures/ls_recursive_long_raw.txt");
+    const LA_REPO_ROOT: &str = include_str!("../../../tests/fixtures/ls_la_repo_root_raw.txt");
+    const RECURSIVE_SIZES: &str =
+        include_str!("../../../tests/fixtures/ls_recursive_long_sizes_raw.txt");
+
     #[test]
-    fn test_compact_truncates_past_cap() {
+    fn recursive_listing_keeps_each_directory_under_its_heading() {
+        let (entries, _parsed, truncated, filtered) = compact_ls(RECURSIVE_LONG, false, false);
+        assert!(truncated.is_empty(), "nothing cut: {truncated:?}");
+        assert!(
+            entries.contains(
+                "home/profiles/terminal/tests:\n\
+                 test_claude_rc.py\n\
+                 test_claude_session.zsh\n\
+                 test_claude_session_wrapper.sh\n\
+                 test_claude_title_glyph.py\n\
+                 test_kitty_session_decision.sh\n\
+                 test_kitty_session_save.py\n"
+            ),
+            "{entries}"
+        );
+        for patch in [
+            "clamonacc-ddd-memory.patch",
+            "clamonacc-fts-nsok.patch",
+            "clamonacc-poll.patch",
+            "clamonacc-rewalk-new-dirs.patch",
+            "clamonacc-rm-hierarchy-len.patch",
+            "clamonacc-vanished-dirs.patch",
+        ] {
+            assert!(
+                entries.contains(&format!("{patch}\n")),
+                "missing {patch}:\n{entries}"
+            );
+        }
+        assert!(
+            entries.contains("home/profiles/terminal/kitty:\n"),
+            "{entries}"
+        );
+        // A noise directory's own listing goes with it, recoverable through the hint.
+        assert!(!entries.contains("cpython-313.pyc"), "{entries}");
+        assert!(
+            filtered
+                .iter()
+                .any(|l| l.contains("kitty-session-save.cpython-313.pyc")),
+            "{filtered:?}"
+        );
+    }
+
+    #[test]
+    fn long_listing_keeps_exact_sizes_and_modification_times() {
+        let (entries, _parsed, _truncated, _filtered) = compact_ls(RECURSIVE_SIZES, false, true);
+        assert!(
+            entries.contains("internal/container:\n644  container.go  7316  Nov 25 03:03\n"),
+            "{entries}"
+        );
+        assert!(
+            entries.contains("644  pytext_test.go  16415  Nov 25 03:03\n"),
+            "{entries}"
+        );
+
+        let (entries, _parsed, _truncated, _filtered) = compact_ls(LA_REPO_ROOT, true, true);
+        assert!(
+            entries.contains("755  changelog.d/  Nov 25 04:42\n"),
+            "{entries}"
+        );
+        assert!(
+            entries.contains("644  THREAT_MODEL.md  16420  Nov 25 03:34\n"),
+            "{entries}"
+        );
+        assert!(!entries.contains("users"), "{entries}");
+    }
+
+    #[test]
+    fn test_compact_truncates_past_budget() {
         let mut input = String::from("total 0\n");
-        for i in 0..60 {
+        for i in 0..1000 {
             input.push_str(&format!(
-                "-rw-r--r--  1 user  staff  100 Jan  1 12:00 file{:02}.txt\n",
+                "-rw-r--r--  1 user  staff  100 Jan  1 12:00 file{:04}.txt\n",
                 i
             ));
         }
         let (entries, _parsed, truncated, _hidden) = compact_ls(&input, false, false);
-        assert_eq!(entries.lines().count(), CAP_INVENTORY);
-        assert_eq!(truncated.len(), 60 - CAP_INVENTORY);
-        assert!(entries.contains("file00.txt"));
-        assert!(!entries.contains("file59.txt"));
+        // "fileNNNN.txt\n" is 13 bytes.
+        assert_eq!(entries.lines().count(), LS_BYTE_BUDGET / 13);
+        assert_eq!(truncated.len(), 1000 - LS_BYTE_BUDGET / 13);
+        assert!(entries.len() <= LS_BYTE_BUDGET);
+        assert!(entries.contains("file0000.txt"));
+        assert!(!entries.contains("file0999.txt"));
         assert!(
-            truncated.iter().any(|l| l.contains("file59.txt")),
+            truncated.iter().any(|l| l.contains("file0999.txt")),
             "overflow entries must be recoverable via the tee file"
         );
     }
@@ -1048,16 +1167,6 @@ mod tests {
         let (entries, parsed_count, _truncated, _hidden) = compact_ls(input, false, false);
         assert_eq!(parsed_count, 0);
         assert_eq!(entries, "(empty)\n");
-    }
-
-    #[test]
-    fn test_human_size() {
-        assert_eq!(human_size(0), "0B");
-        assert_eq!(human_size(500), "500B");
-        assert_eq!(human_size(1024), "1.0K");
-        assert_eq!(human_size(1234), "1.2K");
-        assert_eq!(human_size(1_048_576), "1.0M");
-        assert_eq!(human_size(2_500_000), "2.4M");
     }
 
     #[test]
@@ -1122,16 +1231,16 @@ mod tests {
             "should contain 'data.json', got: {entries}"
         );
         assert!(
-            !entries.contains("16:18"),
+            !entries.contains("16:18 empty.txt") && !entries.contains("16:18 data.json"),
             "time should not leak into filename, got: {entries}"
         );
         assert!(
-            entries.contains("0B"),
-            "empty.txt should show 0B, got: {entries}"
+            entries.contains("644  empty.txt  0  Mar 31 16:18\n"),
+            "empty.txt should show 0 bytes, got: {entries}"
         );
         assert!(
-            entries.contains("1.2K"),
-            "data.json should show 1.2K (1234 bytes), got: {entries}"
+            entries.contains("644  data.json  1234  Mar 31 16:18\n"),
+            "data.json should show 1234 bytes, got: {entries}"
         );
     }
 
@@ -1145,7 +1254,10 @@ mod tests {
             entries.contains("archive.tar"),
             "should contain filename, got: {entries}"
         );
-        assert!(entries.contains("5.5K"), "should show 5.5K, got: {entries}");
+        assert!(
+            entries.contains("archive.tar  5678  Dec 25 2024"),
+            "should show the size and the year, got: {entries}"
+        );
     }
 
     #[test]
@@ -1278,15 +1390,15 @@ mod tests {
                      -rwxr-xr-x  1 user  staff   500 Jan  1 12:00 build.sh\n";
         let (entries, _parsed, _truncated, _hidden) = compact_ls(input, false, true);
         assert!(
-            entries.contains("755  src/"),
+            entries.contains("755  src/  Jan 1 12:00"),
             "dir should be prefixed with octal perms, got: {entries}"
         );
         assert!(
-            entries.contains("644  Cargo.toml  1.2K"),
+            entries.contains("644  Cargo.toml  1234  Jan 1 12:00"),
             "file should be prefixed with octal perms, got: {entries}"
         );
         assert!(
-            entries.contains("755  build.sh  500B"),
+            entries.contains("755  build.sh  500  Jan 1 12:00"),
             "executable should show 755, got: {entries}"
         );
     }
@@ -1347,7 +1459,7 @@ mod tests {
 
     #[test]
     fn test_render_bare_ls_keeps_compact_when_it_saves() {
-        let files: Vec<String> = (0..CAP_INVENTORY + 40)
+        let files: Vec<String> = (0..400)
             .map(|i| format!("file_with_a_long_name_{i:03}.txt"))
             .collect();
         let mut raw: String = files.iter().map(|name| long_line('-', name)).collect();
@@ -1357,7 +1469,12 @@ mod tests {
         let native = one_per_line(&names);
         let out = render(&raw, Some(&native), false, false, 0);
         assert!(out.starts_with("file_with_a_long_name_000.txt\n"), "{out}");
-        assert!(out.contains("... (40 more, 1 filtered)"), "{out}");
+        // Each "file_with_a_long_name_NNN.txt\n" line is 30 bytes.
+        let more = 400 - LS_BYTE_BUDGET / 30;
+        assert!(
+            out.contains(&format!("... ({more} more, 1 filtered)")),
+            "{out}"
+        );
         assert!(estimate_tokens(&out) < estimate_tokens(&native));
     }
 
@@ -1411,7 +1528,7 @@ mod tests {
     #[test]
     fn test_render_long_listing_keeps_compact_when_it_saves() {
         let raw = format!("{}{}", long_line('d', "src"), long_line('-', "a.rs"));
-        let compact = "644  src/\n644  a.rs  1.2K\n";
+        let compact = "644  src/  Jan 1 12:00\n644  a.rs  1234  Jan 1 12:00\n";
         assert_eq!(render(&raw, Some(&raw), false, true, 0), compact);
         assert_eq!(render(&raw, None, false, true, 0), compact);
     }
