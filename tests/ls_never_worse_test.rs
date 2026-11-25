@@ -82,10 +82,11 @@ fn bare_ls_never_prints_sizes() {
     let dir = common::tempdir();
     home_like(dir.path());
     fs::create_dir(dir.path().join("node_modules")).expect("create dir");
-    for n in 0..60 {
+    // Enough entries to pass the listing's ~8 KiB display budget.
+    for n in 0..400 {
         file(
             dir.path(),
-            &format!("module_with_a_long_name_{n:02}.rs"),
+            &format!("module_with_a_long_name_{n:03}.rs"),
             1_234,
         );
     }

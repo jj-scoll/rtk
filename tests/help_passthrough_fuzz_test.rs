@@ -578,10 +578,11 @@ fn a_tools_own_dash_h_is_still_filtered() {
     std::fs::write(dir.join("two.txt"), "y\n").expect("write");
     let path = dir.to_string_lossy().into_owned();
     let wide = common::tempdir();
-    for n in 0..60 {
+    // Enough entries to pass `rtk ls`'s ~8 KiB display budget, so filtered differs from native.
+    for n in 0..400 {
         std::fs::write(
             wide.path()
-                .join(format!("module_with_a_long_name_{n:02}.rs")),
+                .join(format!("module_with_a_long_name_{n:03}.rs")),
             "z\n",
         )
         .expect("write");

@@ -1,0 +1,14 @@
+internal:
+total 8
+drwxr-xr-x 2 user users 4096 Nov 25 03:03 container
+drwxr-xr-x 2 user users 4096 Nov 25 03:03 pytext
+
+internal/container:
+total 16
+-rw-r--r-- 1 user users 7316 Nov 25 03:03 container.go
+-rw-r--r-- 1 user users 7442 Nov 25 03:03 container_test.go
+
+internal/pytext:
+total 36
+-rw-r--r-- 1 user users 12402 Nov 25 03:03 pytext.go
+-rw-r--r-- 1 user users 16415 Nov 25 03:03 pytext_test.go

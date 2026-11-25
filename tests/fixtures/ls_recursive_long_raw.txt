@@ -1,0 +1,72 @@
+home/profiles:
+total 16
+drwxr-xr-x 3 user users 4096 Nov 25 04:32 os
+drwxr-xr-x 7 user users 4096 Nov 25 04:12 terminal
+
+home/profiles/os/clamav:
+total 64
+-rw-r--r-- 1 user users 13637 Nov  4 17:32 clamonacc-ddd-memory.patch
+-rw-r--r-- 1 user users  1639 Nov  4 11:08 clamonacc-fts-nsok.patch
+-rw-r--r-- 1 user users  3259 Nov  4 18:26 clamonacc-poll.patch
+-rw-r--r-- 1 user users  7876 Nov  4 13:24 clamonacc-rewalk-new-dirs.patch
+-rw-r--r-- 1 user users   670 Nov  4 12:41 clamonacc-rm-hierarchy-len.patch
+-rw-r--r-- 1 user users  1967 Nov  4 12:26 clamonacc-vanished-dirs.patch
+-rw-r--r-- 1 user users  2045 Nov  4 09:51 lean-fetch.sh
+-rw-r--r-- 1 user users  3666 Nov  4 09:54 lean-install.sh
+-rw-r--r-- 1 user users  4479 Nov  4 10:16 scan.sh
+-rw-r--r-- 1 user users  1085 Nov  4 09:57 virus-event.sh
+-rw-r--r-- 1 user users  1840 Nov 18 06:00 virus-found.sh
+
+home/profiles/terminal:
+total 124
+drwxr-xr-x 2 user users  4096 Oct 28 15:45 __pycache__
+-rw-r--r-- 1 user users  1345 Aug 26 03:43 atuin.nix
+-rw-r--r-- 1 user users   756 Nov 11 02:03 git.nix
+drwxr-xr-x 3 user users  4096 Nov  4 05:06 kitty
+-rw-r--r-- 1 user users  1544 Nov 11 02:48 kitty-restore.nix
+-rw-r--r-- 1 user users   566 Aug 26 14:38 kitty-restore.zsh
+-rwxr-xr-x 1 user users  5682 Oct 27 12:11 kitty-session
+-rw-r--r-- 1 user users 11313 Oct 28 15:45 kitty-session-save.py
+-rw-r--r-- 1 user users  2093 Oct 28 18:37 kitty.nix
+-rw-r--r-- 1 user users   691 Nov 11 02:06 ssh.nix
+-rw-r--r-- 1 user users   363 Aug 26 03:43 starship.nix
+-rw-r--r-- 1 user users  5123 Apr 21  2026 starship.toml
+drwxr-xr-x 3 user users  4096 Nov  4 05:05 tests
+-rw-r--r-- 1 user users  1080 Oct 28 07:58 tool-configs.nix
+-rw-r--r-- 1 user users 10698 Nov 17 23:45 zsh.nix
+
+home/profiles/terminal/__pycache__:
+total 32
+-rw-r--r-- 1 user users 16160 Oct 28 15:45 kitty-session-save.cpython-313.pyc
+-rw-r--r-- 1 user users 14934 Oct 27 11:35 kitty-session-save.cpython-314.pyc
+
+home/profiles/terminal/kitty:
+total 52
+-rw-r----- 1 user users 1549 Aug 26 13:02 Catppuccin.conf
+-rw-r--r-- 1 user users  629 Aug 26 13:02 Tomorrow Night Bright.conf
+drwxr-xr-x 2 user users 4096 Nov  4 05:06 __pycache__
+-rw-r--r-- 1 user users  138 Aug 26 13:02 choose-files.conf
+-rw-r----- 1 user users  932 Aug 26 13:02 current-theme.conf
+-rw-r--r-- 1 user users 1174 Aug 26 13:02 diff.conf
+-rw-r--r-- 1 user users 3667 Oct 28 18:37 kitty.conf
+-rw-r----- 1 user users 7517 Aug 26 13:02 maps.conf
+-rw-r--r-- 1 user users  965 Aug 26 13:02 quick-access-terminal.conf
+-rw-r----- 1 user users   35 Aug 26 13:02 ssh.conf
+
+home/profiles/terminal/kitty/__pycache__:
+total 4
+
+home/profiles/terminal/tests:
+total 52
+drwxr-xr-x 2 user users  4096 Oct 27 11:35 __pycache__
+-rw-r--r-- 1 user users  1886 Nov  4 05:05 test_claude_rc.py
+-rwxr-xr-x 1 user users  2073 Aug 26 13:02 test_claude_session.zsh
+-rw-r--r-- 1 user users  1541 Oct 21 17:03 test_claude_session_wrapper.sh
+-rw-r--r-- 1 user users  4945 Oct 28 18:37 test_claude_title_glyph.py
+-rwxr-xr-x 1 user users  5872 Aug 26 15:01 test_kitty_session_decision.sh
+-rw-r--r-- 1 user users 15073 Oct 28 15:45 test_kitty_session_save.py
+-rwxr-xr-x 1 user users   585 Aug 26 13:02 verify-verbatim.sh
+
+home/profiles/terminal/tests/__pycache__:
+total 24
+-rw-r--r-- 1 user users 23648 Oct 27 11:35 test_kitty_session_save.cpython-314-pytest-9.1.1.pyc
