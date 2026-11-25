@@ -299,8 +299,10 @@ pub struct GainSummary {
     pub total_time_ms: u64,
     /// Average execution time per timed command (milliseconds)
     pub avg_time_ms: u64,
-    /// Top 10 commands by tokens saved: (cmd, count, saved, weighted_rate, avg_time_ms)
-    pub by_command: Vec<(String, usize, usize, f64, u64)>,
+    /// Top 10 commands by tokens saved: (cmd, count, saved, weighted_rate, avg_time_ms, oversized_runs).
+    /// `saved` and the rate cover only runs with input within [`HEADLINE_INPUT_CAP_TOKENS`];
+    /// `oversized_runs` counts the runs left out of them (still part of `count`).
+    pub by_command: Vec<(String, usize, usize, f64, u64, usize)>,
     /// Last 30 days of activity: (date, saved_tokens)
     pub by_day: Vec<(String, usize)>,
     /// Rows left out of the totals above: input over [`HEADLINE_INPUT_CAP_TOKENS`]
@@ -418,7 +420,7 @@ pub struct MonthStats {
 /// `CASE WHEN SUM(input_tokens) > 0 THEN SUM(saved_tokens) / SUM(input_tokens) * 100.0 ELSE 0.0 END`
 /// instead. `saved_tokens` is signed, so the rate can be negative where the 3rd field, being
 /// unsigned, is clamped to 0.
-type CommandStats = (String, usize, usize, f64, u64);
+type CommandStats = (String, usize, usize, f64, u64, usize);
 
 /// Whether a stored row's elapsed time belongs to a filtered command run or to the lifetime of
 /// an unfiltered child process. A filtered `rtk <command>` label is timed even with zero input,
@@ -1414,28 +1416,41 @@ impl Tracker {
         let timing = timing_sql("rtk_cmd");
         let mut stmt = self.conn.prepare(
             &format!(
-                "SELECT rtk_cmd, COUNT(*), SUM(saved_tokens),
-                    CASE WHEN SUM(input_tokens) > 0 THEN SUM(saved_tokens) * 100.0 / SUM(input_tokens) ELSE 0.0 END,
-                    COALESCE(AVG(CASE WHEN {timing} = 1 THEN exec_time_ms END), 0.0)
+                "SELECT rtk_cmd, COUNT(*),
+                    COALESCE(SUM(CASE WHEN input_tokens <= ?3 THEN saved_tokens END), 0),
+                    CASE WHEN COALESCE(SUM(CASE WHEN input_tokens <= ?3 THEN input_tokens END), 0) > 0
+                        THEN SUM(CASE WHEN input_tokens <= ?3 THEN saved_tokens END) * 100.0
+                            / SUM(CASE WHEN input_tokens <= ?3 THEN input_tokens END)
+                        ELSE 0.0 END,
+                    COALESCE(AVG(CASE WHEN {timing} = 1 THEN exec_time_ms END), 0.0),
+                    COALESCE(SUM(CASE WHEN input_tokens > ?3 THEN 1 END), 0)
              FROM commands
              WHERE (?1 IS NULL OR project_path = ?1 OR project_path GLOB ?2)
              GROUP BY rtk_cmd
-             ORDER BY SUM(saved_tokens) DESC
+             ORDER BY COALESCE(SUM(CASE WHEN input_tokens <= ?3 THEN saved_tokens END), 0) DESC
              LIMIT 10"
             ), // added: project filter in WHERE
         )?;
 
-        let rows = stmt.query_map(params![project_exact, project_glob], |row| {
-            // added: params
-            Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, i64>(1)? as usize,
-                // SUM(saved_tokens): clamp a net-negative group to 0 (unsigned field).
-                row.get::<_, i64>(2)?.max(0) as usize,
-                row.get::<_, f64>(3)?,
-                row.get::<_, f64>(4)? as u64,
-            ))
-        })?;
+        let rows = stmt.query_map(
+            params![
+                project_exact,
+                project_glob,
+                HEADLINE_INPUT_CAP_TOKENS as i64
+            ],
+            |row| {
+                // added: params
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, i64>(1)? as usize,
+                    // Capped SUM(saved_tokens): clamp a net-negative group to 0 (unsigned field).
+                    row.get::<_, i64>(2)?.max(0) as usize,
+                    row.get::<_, f64>(3)?,
+                    row.get::<_, f64>(4)? as u64,
+                    row.get::<_, i64>(5)? as usize,
+                ))
+            },
+        )?;
 
         Ok(rows.collect::<Result<Vec<_>, _>>()?)
     }
@@ -1449,19 +1464,27 @@ impl Tracker {
             "SELECT DATE(timestamp, 'localtime'), SUM(saved_tokens)
              FROM commands
              WHERE (?1 IS NULL OR project_path = ?1 OR project_path GLOB ?2)
+               AND input_tokens <= ?3
              GROUP BY DATE(timestamp, 'localtime')
              ORDER BY DATE(timestamp, 'localtime') DESC
              LIMIT 30", // added: project filter in WHERE
         )?;
 
-        let rows = stmt.query_map(params![project_exact, project_glob], |row| {
-            // added: params
-            // SUM(saved_tokens) per day: clamp a net-negative day to 0 (unsigned field).
-            Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, i64>(1)?.max(0) as usize,
-            ))
-        })?;
+        let rows = stmt.query_map(
+            params![
+                project_exact,
+                project_glob,
+                HEADLINE_INPUT_CAP_TOKENS as i64
+            ],
+            |row| {
+                // added: params
+                // SUM(saved_tokens) per day: clamp a net-negative day to 0 (unsigned field).
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, i64>(1)?.max(0) as usize,
+                ))
+            },
+        )?;
 
         let mut result: Vec<_> = rows.collect::<Result<Vec<_>, _>>()?;
         result.reverse();
@@ -3236,15 +3259,68 @@ mod tests {
         assert_eq!(days.len(), 1);
         assert_eq!(days[0].input_tokens, 1_000, "period tables use the cap too");
 
-        let diagnosable = summary
+        let huge = summary
             .by_command
             .iter()
-            .any(|(cmd, _, saved, _, _)| cmd == "rtk cat huge.log" && *saved > 900_000);
+            .find(|(cmd, ..)| cmd == "rtk cat huge.log")
+            .unwrap_or_else(|| {
+                panic!(
+                    "the oversized row must stay visible in by_command: {:?}",
+                    summary.by_command
+                )
+            });
+        assert_eq!(huge.2, 0, "oversized savings must not inflate by_command");
+        assert_eq!(huge.5, 1, "the oversized run is counted");
+        let normal = summary
+            .by_command
+            .iter()
+            .find(|(cmd, ..)| cmd == "rtk ls")
+            .expect("normal command listed");
+        assert_eq!(normal.2, 500);
+        assert_eq!(normal.5, 0);
+    }
+
+    #[test]
+    fn mixed_command_counts_only_capped_runs_in_saved_and_rate() {
+        let tracker = Tracker::new_in_memory().expect("Failed to create tracker");
+        tracker
+            .record("rg a", "rtk rg", 1_000, 500, 5)
+            .expect("record normal");
+        tracker
+            .record("rg b", "rtk rg", 1_000_000, 100, 5)
+            .expect("record oversized");
+
+        let summary = tracker.get_summary().expect("summary");
+        let row = summary
+            .by_command
+            .iter()
+            .find(|(cmd, ..)| cmd == "rtk rg")
+            .expect("rtk rg listed");
+        assert_eq!(row.1, 2, "count stays all runs");
+        assert_eq!(row.2, 500);
         assert!(
-            diagnosable,
-            "the oversized row must stay visible in by_command: {:?}",
-            summary.by_command
+            (row.3 - 50.0).abs() < 0.01,
+            "rate must be capped, got {}",
+            row.3
         );
+        assert_eq!(row.5, 1);
+        let listed: usize = summary.by_command.iter().map(|r| r.2).sum();
+        assert!(listed <= summary.total_saved);
+    }
+
+    #[test]
+    fn oversized_rows_do_not_add_to_by_day() {
+        let tracker = Tracker::new_in_memory().expect("Failed to create tracker");
+        tracker
+            .record("ls", "rtk ls", 1_000, 500, 5)
+            .expect("record normal");
+        tracker
+            .record("cat huge.log", "rtk cat huge.log", 1_000_000, 100, 5)
+            .expect("record oversized");
+
+        let summary = tracker.get_summary().expect("summary");
+        let total: usize = summary.by_day.iter().map(|(_, s)| *s).sum();
+        assert_eq!(total, 500, "by_day: {:?}", summary.by_day);
     }
 
     // 4. track_passthrough doesn't dilute stats (input=0, output=0)
@@ -4595,7 +4671,7 @@ mod tests {
 
         // Override project_path by inserting directly via conn
         let saved_small = 10_i64; // 100 in - 90 out = 10 saved → 10%
-        let saved_large = 95_000_i64; // 100_000 in - 5_000 out = 95_000 saved → 95%
+        let saved_large = 6_650_i64; // 7_000 in - 350 out = 6_650 saved → 95% (under the headline cap)
         tracker
             .conn
             .execute(
@@ -4616,7 +4692,7 @@ mod tests {
                 rusqlite::params![
                     chrono::Utc::now().to_rfc3339(),
                     cmd_name, cmd_name, project,
-                    100_000_i64, 5_000_i64, saved_large, 95.0_f64, 10_i64
+                    7_000_i64, 350_i64, saved_large, 95.0_f64, 10_i64
                 ],
             )
             .expect("Failed to insert large invocation");
@@ -4627,12 +4703,12 @@ mod tests {
 
         let entry = by_cmd
             .iter()
-            .find(|(name, _, _, _, _)| name == cmd_name)
+            .find(|(name, _, _, _, _, _)| name == cmd_name)
             .expect("Test command not found in by_command stats");
 
-        let (_name, _count, _saved, rate, _time) = entry;
+        let (_name, _count, _saved, rate, _time, _over) = entry;
 
-        // Weighted rate = (10 + 95_000) / (100 + 100_000) * 100.0 ≈ 94.9%
+        // Weighted rate = (10 + 6_650) / (100 + 7_000) * 100.0 ≈ 93.8%
         // Unweighted avg would be (10.0 + 95.0) / 2 = 52.5%
         // The gap proves the fix works.
         assert!(
@@ -4644,15 +4720,15 @@ mod tests {
 
     // 15. The weighted rate tracks SUM(saved_tokens), not the mean of per-call percentages
     //
-    // A long-tailed pair under one rtk_cmd: a 1M-token call saving 90% and a 100-token
+    // A long-tailed pair under one rtk_cmd: a 7k-token call saving 90% and a 100-token
     // call saving 10%. The mean of the two percentages is 50%; the weighted rate is
-    // ~89.99% and is the figure consistent with the Saved column in the same row.
+    // ~88.9% and is the figure consistent with the Saved column in the same row.
     #[test]
     fn test_weighted_rate_via_get_by_command() {
         let tracker = Tracker::new_in_memory().expect("Failed to create tracker");
 
         tracker
-            .record("grep huge", "rtk grep", 1_000_000, 100_000, 50)
+            .record("grep huge", "rtk grep", 7_000, 700, 50)
             .expect("record huge");
         tracker
             .record("grep tiny", "rtk grep", 100, 90, 5)
@@ -4660,14 +4736,14 @@ mod tests {
 
         let by_command = tracker.get_by_command(None).expect("get_by_command");
 
-        let (_cmd, count, saved, pct, _avg_time) = by_command
+        let (_cmd, count, saved, pct, _avg_time, _oversized) = by_command
             .iter()
             .find(|(cmd, ..)| cmd == "rtk grep")
             .expect("rtk grep row not found");
 
         assert_eq!(*count, 2);
-        assert_eq!(*saved, 900_010);
-        let expected = 900_010.0 / 1_000_100.0 * 100.0;
+        assert_eq!(*saved, 6_310);
+        let expected = 6_310.0 / 7_100.0 * 100.0;
         assert!(
             (pct - expected).abs() < 0.01,
             "expected weighted rate ~{expected:.2}, got {pct:.2}"
@@ -4691,10 +4767,10 @@ mod tests {
             .expect("Failed to record small command");
 
         let summary = tracker.get_summary().expect("Failed to get summary");
-        let (_, count, saved, savings_pct, _) = summary
+        let (_, count, saved, savings_pct, _, _) = summary
             .by_command
             .iter()
-            .find(|(command, _, _, _, _)| command == "rtk grep")
+            .find(|(command, _, _, _, _, _)| command == "rtk grep")
             .expect("rtk grep stats not found");
 
         assert_eq!(*count, 2);
@@ -4715,10 +4791,10 @@ mod tests {
             .expect("Failed to record passthrough command");
 
         let summary = tracker.get_summary().expect("Failed to get summary");
-        let (_, _, _, savings_pct, _) = summary
+        let (_, _, _, savings_pct, _, _) = summary
             .by_command
             .iter()
-            .find(|(command, _, _, _, _)| command == "rtk bypass")
+            .find(|(command, _, _, _, _, _)| command == "rtk bypass")
             .expect("rtk bypass stats not found");
 
         assert_eq!(*savings_pct, 0.0);
@@ -4777,10 +4853,10 @@ mod tests {
         // The figure sent to telemetry is the one `rtk gain` prints for the same command.
         let summary = tracker.get_summary().expect("get_summary");
         for (name, rate) in &low {
-            let (_, _, _, gain_rate, _) = summary
+            let (_, _, _, gain_rate, _, _) = summary
                 .by_command
                 .iter()
-                .find(|(command, _, _, _, _)| command == name)
+                .find(|(command, _, _, _, _, _)| command == name)
                 .unwrap_or_else(|| panic!("{name} missing from by_command"));
             assert!(
                 (gain_rate - rate).abs() < 1e-9,
