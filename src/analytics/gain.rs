@@ -1020,21 +1020,21 @@ pub fn run(
             let count_width = summary
                 .by_command
                 .iter()
-                .map(|(_, count, _, _, _)| count.to_string().len())
+                .map(|(_, count, ..)| count.to_string().len())
                 .max()
                 .unwrap_or(5)
                 .max(5);
             let saved_width = summary
                 .by_command
                 .iter()
-                .map(|(_, _, saved, _, _)| format_tokens(*saved).len())
+                .map(|(_, _, saved, ..)| format_tokens(*saved).len())
                 .max()
                 .unwrap_or(5)
                 .max(5);
             let time_width = summary
                 .by_command
                 .iter()
-                .map(|(command, _, _, _, avg_time)| command_time_label(command, *avg_time).len())
+                .map(|(command, _, _, _, avg_time, _)| command_time_label(command, *avg_time).len())
                 .max()
                 .unwrap_or(6)
                 .max(6);
@@ -1046,6 +1046,7 @@ pub fn run(
                 + count_width
                 + 2
                 + saved_width
+                + 1
                 + 2
                 + 6
                 + 2
@@ -1054,7 +1055,7 @@ pub fn run(
                 + impact_width;
             println!("{}", "─".repeat(table_width));
             println!(
-                "{:>3}  {:<cmd_width$}  {:>count_width$}  {:>saved_width$}  {:>6}  {:>time_width$}  {:<impact_width$}",
+                "{:>3}  {:<cmd_width$}  {:>count_width$}  {:>saved_width$}   {:>6}  {:>time_width$}  {:<impact_width$}",
                 "#",
                 "Command",
                 "Count",
@@ -1073,17 +1074,20 @@ pub fn run(
             let max_saved = summary
                 .by_command
                 .iter()
-                .map(|(_, _, saved, _, _)| *saved)
+                .map(|(_, _, saved, ..)| *saved)
                 .max()
                 .unwrap_or(1);
 
-            for (idx, (cmd, count, saved, pct, avg_time)) in summary.by_command.iter().enumerate() {
+            for (idx, (cmd, count, saved, pct, avg_time, oversized)) in
+                summary.by_command.iter().enumerate()
+            {
                 let row_idx = format!("{:>2}.", idx + 1);
                 let cmd_cell = style_command_cell(&truncate_for_column(cmd, cmd_width)); // added: colored command
                 let count_cell = format!("{:>count_width$}", count, count_width = count_width);
                 let saved_cell = format!(
-                    "{:>saved_width$}",
+                    "{:>saved_width$}{}",
                     format_tokens(*saved),
+                    oversized_marker(*oversized),
                     saved_width = saved_width
                 );
                 let pct_plain = format!("{:>6}", format!("{pct:.1}%"));
@@ -1100,6 +1104,9 @@ pub fn run(
                 );
             }
             println!("{}", "─".repeat(table_width));
+            if let Some(note) = oversized_footnote(&summary.by_command) {
+                println!("{note}");
+            }
             println!();
         }
 
@@ -1955,9 +1962,41 @@ fn print_pro_hint_if_due(tracker: &Tracker) {
     }
 }
 
+/// One-char flag appended to the Saved cell; a space keeps columns aligned.
+fn oversized_marker(oversized_runs: usize) -> &'static str {
+    if oversized_runs > 0 { "*" } else { " " }
+}
+
+/// Footnote line under the By Command table, only when some row is flagged.
+fn oversized_footnote(rows: &[(String, usize, usize, f64, u64, usize)]) -> Option<String> {
+    let total: usize = rows.iter().map(|row| row.5).sum();
+    (total > 0).then(|| {
+        format!("* includes {total} oversized runs excluded from savings (see Excluded above)")
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn oversized_runs_get_a_marker_and_one_footnote() {
+        assert_eq!(oversized_marker(0), " ");
+        assert_eq!(oversized_marker(3), "*");
+
+        let none = [("rtk ls".to_string(), 2, 500, 50.0, 5, 0)];
+        assert_eq!(oversized_footnote(&none), None);
+
+        let some = [
+            ("rtk ls".to_string(), 2, 500, 50.0, 5, 0),
+            ("rtk rg".to_string(), 4, 100, 10.0, 5, 3),
+            ("rtk cat".to_string(), 1, 0, 0.0, 5, 2),
+        ];
+        let note = oversized_footnote(&some).expect("footnote when a row has oversized runs");
+        assert!(note.starts_with('*'));
+        assert!(note.contains("5 oversized runs"), "{note}");
+        assert!(note.contains("Excluded"), "{note}");
+    }
 
     #[test]
     fn pro_hint_waits_a_week_then_once_a_day() {

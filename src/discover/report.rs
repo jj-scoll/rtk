@@ -145,6 +145,10 @@ pub struct DiscoverReport {
     /// `already_rtk_estimated` does, instead of silently going quiet about it.
     pub rtk_disabled_estimated: usize,
     pub rtk_disabled_examples: Vec<String>,
+    /// Uncovered `Supported` segments left out of `supported` because today's hook
+    /// would not rewrite their command line either (output piped into a parser, a
+    /// loop, a deny rule) — not a saving the user can recover.
+    pub skipped_by_design: usize,
     pub agent_status: AgentIntegrationStatus,
 }
 
@@ -258,6 +262,13 @@ pub fn format_text(report: &DiscoverReport, limit: usize, verbose: bool) -> Stri
             report.total_supported_count(),
             format_tokens(report.total_saveable_tokens()),
         ));
+        if report.skipped_by_design > 0 {
+            out.push_str(&format!(
+                "Not counted: {} commands the hook skips by design \
+                 (output piped into a parser, loops, deny rules)\n",
+                report.skipped_by_design,
+            ));
+        }
     }
 
     // Unhandled
@@ -378,8 +389,31 @@ mod tests {
             rtk_disabled_count: 0,
             rtk_disabled_estimated: 0,
             rtk_disabled_examples: vec![],
+            skipped_by_design: 0,
             agent_status: AgentIntegrationStatus::default(),
         }
+    }
+
+    #[test]
+    fn test_format_text_reports_skipped_by_design() {
+        let mut report = make_report(100, 10);
+        report.supported = vec![dummy_supported_entry()];
+        report.skipped_by_design = 42;
+
+        let output = format_text(&report, 10, false);
+        assert!(
+            output.contains("Not counted: 42 commands the hook skips by design"),
+            "{output}"
+        );
+    }
+
+    #[test]
+    fn test_format_text_omits_skipped_by_design_when_zero() {
+        let mut report = make_report(100, 10);
+        report.supported = vec![dummy_supported_entry()];
+
+        let output = format_text(&report, 10, false);
+        assert!(!output.contains("Not counted:"), "{output}");
     }
 
     #[test]

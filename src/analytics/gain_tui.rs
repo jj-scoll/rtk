@@ -571,7 +571,7 @@ fn draw_table(f: &mut Frame, area: Rect, state: &State) {
         .iter()
         .take(10)
         .enumerate()
-        .map(|(idx, (cmd, count, saved, pct, _avg_time))| {
+        .map(|(idx, (cmd, count, saved, pct, _avg_time, _oversized))| {
             let row_style = if idx % 2 == 1 {
                 Style::default().add_modifier(Modifier::DIM)
             } else {
