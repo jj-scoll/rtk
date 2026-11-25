@@ -37,8 +37,107 @@ struct RuffLocation {
 
 #[derive(Debug, Deserialize)]
 struct RuffFix {
-    #[allow(dead_code)]
     applicability: Option<String>,
+}
+
+/// How ruff counts a diagnostic's fix in its summary: `[*]` marks only safe
+/// fixes, unless `--unsafe-fixes` is on, which promotes unsafe ones too.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum FixKind {
+    Safe,
+    Unsafe,
+    None,
+}
+
+impl RuffDiagnostic {
+    fn fix_kind(&self) -> FixKind {
+        match self.fix.as_ref().and_then(|f| f.applicability.as_deref()) {
+            Some("safe") => FixKind::Safe,
+            Some("unsafe") => FixKind::Unsafe,
+            // display-only fixes and diagnostics without a fix are not applied by --fix.
+            _ => FixKind::None,
+        }
+    }
+}
+
+/// The ruff flags that change what its summary says.
+#[derive(Debug, Default, Clone, Copy)]
+struct RuffSummaryFlags {
+    fix: bool,
+    unsafe_fixes: bool,
+}
+
+impl RuffSummaryFlags {
+    /// Read from the user's args, the last of each on/off pair winning as in ruff.
+    /// Settings from pyproject.toml / ruff.toml are not visible here.
+    fn from_args(args: &[String]) -> Self {
+        let mut flags = Self::default();
+        for arg in args.iter().take_while(|a| *a != "--") {
+            match arg.as_str() {
+                "--fix" => flags.fix = true,
+                "--no-fix" => flags.fix = false,
+                "--unsafe-fixes" => flags.unsafe_fixes = true,
+                "--no-unsafe-fixes" => flags.unsafe_fixes = false,
+                _ => {}
+            }
+        }
+        flags
+    }
+}
+
+fn plural(count: usize, one: &str, many: &str) -> String {
+    format!("{} {}", count, if count == 1 { one } else { many })
+}
+
+/// The closing lines ruff prints under its text output, rebuilt in Ruff 0.17's
+/// wording from the JSON (which carries no summary of its own).
+fn ruff_summary_lines(diagnostics: &[RuffDiagnostic], flags: RuffSummaryFlags) -> String {
+    let safe = diagnostics
+        .iter()
+        .filter(|d| d.fix_kind() == FixKind::Safe)
+        .count();
+    let unsafe_ = diagnostics
+        .iter()
+        .filter(|d| d.fix_kind() == FixKind::Unsafe)
+        .count();
+    let (fixable, hidden) = if flags.unsafe_fixes {
+        (safe + unsafe_, 0)
+    } else {
+        (safe, unsafe_)
+    };
+
+    let errors = plural(diagnostics.len(), "error", "errors");
+    let mut out = if flags.fix {
+        // Under --fix ruff reports "(N fixed, M remaining)"; the JSON only lists the
+        // remaining diagnostics, so the fixed count is unknown and not invented.
+        format!("{errors} remaining after `--fix`.\n")
+    } else {
+        format!("Found {errors}.\n")
+    };
+    let hidden_note = (hidden > 0).then(|| {
+        format!(
+            "{} available with `--fix --unsafe-fixes`",
+            plural(hidden, "unsafe fix", "unsafe fixes")
+        )
+    });
+    match (fixable, hidden_note) {
+        (0, None) => {}
+        (0, Some(note)) => out.push_str(&format!("{note}.\n")),
+        (n, None) => out.push_str(&format!("[*] {n} fixable with `--fix`.\n")),
+        (n, Some(note)) => out.push_str(&format!("[*] {n} fixable with `--fix` ({note}).\n")),
+    }
+    out
+}
+
+/// Ruff's own `[*]` for a fix `--fix` applies; unsafe fixes are named, since
+/// whether a fix is safe is often the question.
+fn fix_marker(diag: &RuffDiagnostic, flags: RuffSummaryFlags) -> &'static str {
+    match diag.fix_kind() {
+        FixKind::Safe => " [*]",
+        FixKind::Unsafe if flags.unsafe_fixes => " [*]",
+        FixKind::Unsafe => " [unsafe fix]",
+        FixKind::None => "",
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -111,7 +210,7 @@ fn filter_ruff_output(args: &[String], stdout: &str) -> String {
     let use_json_filter = !user_set_output_format || user_json_format;
 
     if is_check && use_json_filter && !trimmed.is_empty() {
-        filter_ruff_check_json(stdout)
+        filter_ruff_check_json_with(stdout, RuffSummaryFlags::from_args(args))
     } else if is_format {
         filter_ruff_format(stdout)
     } else if ruff_output_is_complete(route, args) {
@@ -261,6 +360,10 @@ fn plan_ruff_command(args: &[String]) -> Vec<String> {
 
 /// Filter ruff check JSON output - group by rule and file
 pub fn filter_ruff_check_json(output: &str) -> String {
+    filter_ruff_check_json_with(output, RuffSummaryFlags::default())
+}
+
+fn filter_ruff_check_json_with(output: &str, flags: RuffSummaryFlags) -> String {
     let diagnostics: Result<Vec<RuffDiagnostic>, _> = serde_json::from_str(output);
 
     let diagnostics = match diagnostics {
@@ -280,7 +383,6 @@ pub fn filter_ruff_check_json(output: &str) -> String {
     }
 
     let total_issues = diagnostics.len();
-    let fixable_count = diagnostics.iter().filter(|d| d.fix.is_some()).count();
 
     // Count unique files
     let unique_files: std::collections::HashSet<_> =
@@ -315,10 +417,6 @@ pub fn filter_ruff_check_json(output: &str) -> String {
         "Ruff: {} issues in {} files",
         total_issues, total_files
     ));
-
-    if fixable_count > 0 {
-        result.push_str(&format!(" ({} fixable)", fixable_count));
-    }
     result.push('\n');
 
     // Show top rules
@@ -376,11 +474,12 @@ pub fn filter_ruff_check_json(output: &str) -> String {
         .iter()
         .map(|diag| {
             format!(
-                "  {}:{}:{} {} {}\n",
+                "  {}:{}:{} {}{} {}\n",
                 compact_path(&diag.filename),
                 diag.location.row,
                 diag.location.column,
                 diag.code,
+                fix_marker(diag, flags),
                 truncate(diag.message.trim(), 100),
             )
         })
@@ -394,11 +493,12 @@ pub fn filter_ruff_check_json(output: &str) -> String {
     {
         if described_rules.contains(diag.code.as_str()) {
             result.push_str(&format!(
-                "  {}:{}:{} {}\n",
+                "  {}:{}:{} {}{}\n",
                 compact_path(&diag.filename),
                 diag.location.row,
                 diag.location.column,
                 diag.code,
+                fix_marker(diag, flags),
             ));
         } else {
             result.push_str(line);
@@ -417,12 +517,8 @@ pub fn filter_ruff_check_json(output: &str) -> String {
         }
     }
 
-    if fixable_count > 0 {
-        result.push_str(&format!(
-            "\n[hint] Run `ruff check --fix` to auto-fix {} issues\n",
-            fixable_count
-        ));
-    }
+    result.push('\n');
+    result.push_str(&ruff_summary_lines(&diagnostics, flags));
 
     result.trim().to_string()
 }
@@ -732,7 +828,11 @@ mod tests {
         ] {
             assert!(out.contains(location), "{out}");
         }
-        assert!(out.contains("3 issues in 1 files (1 fixable)"), "{out}");
+        assert!(out.contains("3 issues in 1 files\n"), "{out}");
+        assert!(
+            out.ends_with("Found 3 errors.\n[*] 1 fixable with `--fix`."),
+            "{out}"
+        );
         assert!(
             out.len() * 100 <= input.len() * 80,
             "must save at least 20%"
@@ -777,8 +877,8 @@ mod tests {
             "{out}"
         );
         assert!(!out.contains("imported but unused"), "{out}");
-        assert!(out.contains("  src/pkg_a/mod.py:1:8 F401\n"), "{out}");
-        assert!(out.contains("  src/pkg_b/mod.py:1:8 F401\n"), "{out}");
+        assert!(out.contains("  src/pkg_a/mod.py:1:8 F401 [*]\n"), "{out}");
+        assert!(out.contains("  src/pkg_b/mod.py:1:8 F401 [*]\n"), "{out}");
     }
 
     #[test]
@@ -819,6 +919,80 @@ mod tests {
         assert!(result.contains("utils.py"));
         assert!(result.contains("Violations:"), "Violations section missing");
         assert!(result.contains("1:8"), "line:col location missing");
+    }
+
+    /// Reconstructed from Ruff 0.17.4's text output for `ruff check bench/charts.py`
+    /// (5 errors: 3 safe fixes, 1 unsafe fix, 1 with no fix), home path sanitized.
+    const UNSAFE_FIXES_JSON: &str =
+        include_str!("../../../tests/fixtures/ruff_check_unsafe_fixes_raw.json");
+    /// Same capture for `ruff check .` over the project: 23 errors, 5 safe fixes, 6 unsafe.
+    const PROJECT_JSON: &str = include_str!("../../../tests/fixtures/ruff_check_project_raw.json");
+
+    #[test]
+    fn ruff_summary_counts_only_safe_fixes_as_fixable() {
+        let out = filter_ruff_check_json(UNSAFE_FIXES_JSON);
+        assert!(out.contains("Found 5 errors.\n"), "{out}");
+        assert!(
+            out.ends_with(
+                "[*] 3 fixable with `--fix` (1 unsafe fix available with `--fix --unsafe-fixes`)."
+            ),
+            "{out}"
+        );
+        assert!(!out.contains("4 fixable"), "{out}");
+
+        let out = filter_ruff_check_json(PROJECT_JSON);
+        assert!(out.contains("Found 23 errors.\n"), "{out}");
+        assert!(
+            out.contains(
+                "[*] 5 fixable with `--fix` (6 unsafe fixes available with `--fix --unsafe-fixes`)."
+            ),
+            "{out}"
+        );
+        assert!(!out.contains("11 fixable"), "{out}");
+    }
+
+    #[test]
+    fn ruff_violations_mark_safe_and_unsafe_fixes() {
+        let out = filter_ruff_check_json(UNSAFE_FIXES_JSON);
+        assert!(out.contains("charts.py:129:9 ISC004 [unsafe fix]"), "{out}");
+        assert!(out.contains("charts.py:1:1 I001 [*]"), "{out}");
+        assert!(out.contains("charts.py:280:12 F821\n"), "{out}");
+    }
+
+    #[test]
+    fn ruff_summary_follows_unsafe_fixes_and_fix_flags() {
+        let args = |a: &[&str]| a.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        // `--unsafe-fixes` makes ruff count unsafe fixes as fixable.
+        let out = filter_ruff_output(&args(&["check", "--unsafe-fixes"]), UNSAFE_FIXES_JSON);
+        assert!(out.ends_with("[*] 4 fixable with `--fix`."), "{out}");
+        // The last of the pair wins, as in ruff.
+        let out = filter_ruff_output(
+            &args(&["check", "--unsafe-fixes", "--no-unsafe-fixes"]),
+            UNSAFE_FIXES_JSON,
+        );
+        assert!(out.contains("[*] 3 fixable"), "{out}");
+        // Under --fix the JSON lists only what is left, so the count is what remains.
+        let out = filter_ruff_output(&args(&["check", "--fix"]), UNSAFE_FIXES_JSON);
+        assert!(out.contains("5 errors remaining after `--fix`.\n"), "{out}");
+        assert!(!out.contains("Found 5 errors."), "{out}");
+    }
+
+    #[test]
+    fn ruff_summary_with_only_unsafe_or_no_fixes_matches_ruff() {
+        let one = |fix: &str| {
+            format!(
+                r#"[{{"code":"F821","message":"m","location":{{"row":1,"column":1}},"filename":"a.py","fix":{fix}}}]"#
+            )
+        };
+        let out = filter_ruff_check_json(&one(r#"{"applicability":"unsafe"}"#));
+        assert!(
+            out.ends_with("Found 1 error.\n1 unsafe fix available with `--fix --unsafe-fixes`."),
+            "{out}"
+        );
+        let out = filter_ruff_check_json(&one("null"));
+        assert!(out.ends_with("Found 1 error."), "{out}");
+        let out = filter_ruff_check_json(&one(r#"{"applicability":"display-only"}"#));
+        assert!(out.ends_with("Found 1 error."), "{out}");
     }
 
     #[test]

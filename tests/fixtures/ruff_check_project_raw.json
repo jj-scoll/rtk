@@ -1,0 +1,368 @@
+[
+  {
+    "code": "I001",
+    "end_location": {
+      "column": 1,
+      "row": 1
+    },
+    "filename": "/home/user/catalog-bench/bench/charts.py",
+    "fix": {
+      "applicability": "safe",
+      "edits": [],
+      "message": null
+    },
+    "location": {
+      "column": 1,
+      "row": 1
+    },
+    "message": "Import block is un-sorted or un-formatted"
+  },
+  {
+    "code": "F401",
+    "end_location": {
+      "column": 8,
+      "row": 1
+    },
+    "filename": "/home/user/catalog-bench/bench/charts.py",
+    "fix": {
+      "applicability": "safe",
+      "edits": [],
+      "message": null
+    },
+    "location": {
+      "column": 8,
+      "row": 1
+    },
+    "message": "`os` imported but unused"
+  },
+  {
+    "code": "F401",
+    "end_location": {
+      "column": 8,
+      "row": 2
+    },
+    "filename": "/home/user/catalog-bench/bench/charts.py",
+    "fix": {
+      "applicability": "safe",
+      "edits": [],
+      "message": null
+    },
+    "location": {
+      "column": 8,
+      "row": 2
+    },
+    "message": "`sys` imported but unused"
+  },
+  {
+    "code": "ISC004",
+    "end_location": {
+      "column": 9,
+      "row": 129
+    },
+    "filename": "/home/user/catalog-bench/bench/charts.py",
+    "fix": {
+      "applicability": "unsafe",
+      "edits": [],
+      "message": null
+    },
+    "location": {
+      "column": 9,
+      "row": 129
+    },
+    "message": "Unparenthesized implicit string concatenation in collection"
+  },
+  {
+    "code": "F821",
+    "end_location": {
+      "column": 12,
+      "row": 280
+    },
+    "filename": "/home/user/catalog-bench/bench/charts.py",
+    "fix": null,
+    "location": {
+      "column": 12,
+      "row": 280
+    },
+    "message": "Undefined name `yaml`"
+  },
+  {
+    "code": "BLE001",
+    "end_location": {
+      "column": 20,
+      "row": 34
+    },
+    "filename": "/home/user/catalog-bench/bench/harness.py",
+    "fix": null,
+    "location": {
+      "column": 20,
+      "row": 34
+    },
+    "message": "Do not catch blind exception: `Exception`"
+  },
+  {
+    "code": "BLE001",
+    "end_location": {
+      "column": 12,
+      "row": 39
+    },
+    "filename": "/home/user/catalog-bench/bench/harness.py",
+    "fix": null,
+    "location": {
+      "column": 12,
+      "row": 39
+    },
+    "message": "Do not catch blind exception: `Exception`"
+  },
+  {
+    "code": "B023",
+    "end_location": {
+      "column": 56,
+      "row": 132
+    },
+    "filename": "/home/user/catalog-bench/bench/options/_tables.py",
+    "fix": null,
+    "location": {
+      "column": 56,
+      "row": 132
+    },
+    "message": "Function definition does not bind loop variable `kind`"
+  },
+  {
+    "code": "B023",
+    "end_location": {
+      "column": 79,
+      "row": 132
+    },
+    "filename": "/home/user/catalog-bench/bench/options/_tables.py",
+    "fix": null,
+    "location": {
+      "column": 79,
+      "row": 132
+    },
+    "message": "Function definition does not bind loop variable `rows`"
+  },
+  {
+    "code": "I001",
+    "end_location": {
+      "column": 1,
+      "row": 1
+    },
+    "filename": "/home/user/catalog-bench/bench/options/files.py",
+    "fix": {
+      "applicability": "safe",
+      "edits": [],
+      "message": null
+    },
+    "location": {
+      "column": 1,
+      "row": 1
+    },
+    "message": "Import block is un-sorted or un-formatted"
+  },
+  {
+    "code": "B023",
+    "end_location": {
+      "column": 65,
+      "row": 56
+    },
+    "filename": "/home/user/catalog-bench/bench/options/iceberg_per_trace.py",
+    "fix": null,
+    "location": {
+      "column": 65,
+      "row": 56
+    },
+    "message": "Function definition does not bind loop variable `rows`"
+  },
+  {
+    "code": "BLE001",
+    "end_location": {
+      "column": 12,
+      "row": 54
+    },
+    "filename": "/home/user/catalog-bench/bench/pipeline.py",
+    "fix": null,
+    "location": {
+      "column": 12,
+      "row": 54
+    },
+    "message": "Do not catch blind exception: `Exception`"
+  },
+  {
+    "code": "BLE001",
+    "end_location": {
+      "column": 16,
+      "row": 73
+    },
+    "filename": "/home/user/catalog-bench/bench/pipeline.py",
+    "fix": null,
+    "location": {
+      "column": 16,
+      "row": 73
+    },
+    "message": "Do not catch blind exception: `Exception`"
+  },
+  {
+    "code": "BLE001",
+    "end_location": {
+      "column": 20,
+      "row": 103
+    },
+    "filename": "/home/user/catalog-bench/bench/pipeline.py",
+    "fix": null,
+    "location": {
+      "column": 20,
+      "row": 103
+    },
+    "message": "Do not catch blind exception: `Exception`"
+  },
+  {
+    "code": "BLE001",
+    "end_location": {
+      "column": 20,
+      "row": 166
+    },
+    "filename": "/home/user/catalog-bench/bench/pipeline.py",
+    "fix": null,
+    "location": {
+      "column": 20,
+      "row": 166
+    },
+    "message": "Do not catch blind exception: `Exception`"
+  },
+  {
+    "code": "C408",
+    "end_location": {
+      "column": 13,
+      "row": 216
+    },
+    "filename": "/home/user/catalog-bench/bench/pipeline.py",
+    "fix": {
+      "applicability": "unsafe",
+      "edits": [],
+      "message": null
+    },
+    "location": {
+      "column": 13,
+      "row": 216
+    },
+    "message": "Unnecessary `dict()` call (rewrite as a literal)"
+  },
+  {
+    "code": "BLE001",
+    "end_location": {
+      "column": 16,
+      "row": 307
+    },
+    "filename": "/home/user/catalog-bench/bench/pipeline.py",
+    "fix": null,
+    "location": {
+      "column": 16,
+      "row": 307
+    },
+    "message": "Do not catch blind exception: `Exception`"
+  },
+  {
+    "code": "F401",
+    "end_location": {
+      "column": 37,
+      "row": 7
+    },
+    "filename": "/home/user/catalog-bench/bench/run.py",
+    "fix": {
+      "applicability": "safe",
+      "edits": [],
+      "message": null
+    },
+    "location": {
+      "column": 37,
+      "row": 7
+    },
+    "message": "`datetime.timezone` imported but unused"
+  },
+  {
+    "code": "SIM115",
+    "end_location": {
+      "column": 11,
+      "row": 31
+    },
+    "filename": "/home/user/catalog-bench/drivers/python_compare.py",
+    "fix": null,
+    "location": {
+      "column": 11,
+      "row": 31
+    },
+    "message": "Use a context manager for opening files"
+  },
+  {
+    "code": "RUF007",
+    "end_location": {
+      "column": 32,
+      "row": 79
+    },
+    "filename": "/home/user/catalog-bench/tests/test_charts.py",
+    "fix": {
+      "applicability": "unsafe",
+      "edits": [],
+      "message": null
+    },
+    "location": {
+      "column": 32,
+      "row": 79
+    },
+    "message": "Prefer `itertools.pairwise()` over `zip()` when iterating over successive pairs"
+  },
+  {
+    "code": "RUF007",
+    "end_location": {
+      "column": 49,
+      "row": 96
+    },
+    "filename": "/home/user/catalog-bench/tests/test_charts.py",
+    "fix": {
+      "applicability": "unsafe",
+      "edits": [],
+      "message": null
+    },
+    "location": {
+      "column": 49,
+      "row": 96
+    },
+    "message": "Prefer `itertools.pairwise()` over `zip()` when iterating over successive pairs"
+  },
+  {
+    "code": "RUF007",
+    "end_location": {
+      "column": 42,
+      "row": 144
+    },
+    "filename": "/home/user/catalog-bench/tests/test_charts.py",
+    "fix": {
+      "applicability": "unsafe",
+      "edits": [],
+      "message": null
+    },
+    "location": {
+      "column": 42,
+      "row": 144
+    },
+    "message": "Prefer `itertools.pairwise()` over `zip()` when iterating over successive pairs"
+  },
+  {
+    "code": "C408",
+    "end_location": {
+      "column": 9,
+      "row": 17
+    },
+    "filename": "/home/user/catalog-bench/tests/test_pipeline.py",
+    "fix": {
+      "applicability": "unsafe",
+      "edits": [],
+      "message": null
+    },
+    "location": {
+      "column": 9,
+      "row": 17
+    },
+    "message": "Unnecessary `dict()` call (rewrite as a literal)"
+  }
+]

@@ -1,0 +1,88 @@
+[
+  {
+    "code": "I001",
+    "end_location": {
+      "column": 1,
+      "row": 1
+    },
+    "filename": "/home/user/catalog-bench/bench/charts.py",
+    "fix": {
+      "applicability": "safe",
+      "edits": [],
+      "message": null
+    },
+    "location": {
+      "column": 1,
+      "row": 1
+    },
+    "message": "Import block is un-sorted or un-formatted"
+  },
+  {
+    "code": "F401",
+    "end_location": {
+      "column": 8,
+      "row": 1
+    },
+    "filename": "/home/user/catalog-bench/bench/charts.py",
+    "fix": {
+      "applicability": "safe",
+      "edits": [],
+      "message": null
+    },
+    "location": {
+      "column": 8,
+      "row": 1
+    },
+    "message": "`os` imported but unused"
+  },
+  {
+    "code": "F401",
+    "end_location": {
+      "column": 8,
+      "row": 2
+    },
+    "filename": "/home/user/catalog-bench/bench/charts.py",
+    "fix": {
+      "applicability": "safe",
+      "edits": [],
+      "message": null
+    },
+    "location": {
+      "column": 8,
+      "row": 2
+    },
+    "message": "`sys` imported but unused"
+  },
+  {
+    "code": "ISC004",
+    "end_location": {
+      "column": 9,
+      "row": 129
+    },
+    "filename": "/home/user/catalog-bench/bench/charts.py",
+    "fix": {
+      "applicability": "unsafe",
+      "edits": [],
+      "message": null
+    },
+    "location": {
+      "column": 9,
+      "row": 129
+    },
+    "message": "Unparenthesized implicit string concatenation in collection"
+  },
+  {
+    "code": "F821",
+    "end_location": {
+      "column": 12,
+      "row": 280
+    },
+    "filename": "/home/user/catalog-bench/bench/charts.py",
+    "fix": null,
+    "location": {
+      "column": 12,
+      "row": 280
+    },
+    "message": "Undefined name `yaml`"
+  }
+]
