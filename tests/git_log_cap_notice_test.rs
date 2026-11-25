@@ -1423,14 +1423,9 @@ fn parse_recall_hint(line: &str) -> (usize, String) {
     (hidden.parse().expect("hidden count"), id.to_string())
 }
 
-/// A line as the filtered path shows it under a format the user chose: cut to 80 characters.
+/// A line as the filtered path shows it under a format the user chose: whole.
 fn shown_form(line: &str) -> String {
-    if line.chars().count() > 80 {
-        let head: String = line.chars().take(77).collect();
-        format!("{head}...")
-    } else {
-        line.to_string()
-    }
+    line.to_string()
 }
 
 #[test]
@@ -1439,7 +1434,7 @@ fn a_multi_line_user_format_hands_back_the_lines_it_cut_through_recall() {
     // and a `--pretty` that spends several lines on a commit loses commits well before the
     // fiftieth. RTK holds every line it drops, so the hint points at them instead of at a
     // second run of git. What recall returns is what the log would have shown: the same
-    // lines, cut to the same width.
+    // lines, long ones whole.
     let repo = repo_with_subjects(25, |i| format!("commit {i}: {}", "long subject ".repeat(8)));
     for shape in ["--pretty=full", "--pretty=medium", "--format=%H%n%s%n%an"] {
         let git_args = ["log", "-50", "--no-merges", shape];
@@ -1448,7 +1443,7 @@ fn a_multi_line_user_format_hands_back_the_lines_it_cut_through_recall() {
         assert!(raw_lines.len() > 50, "{shape}: the walk must pass the cap");
         assert!(
             raw_lines[50..].iter().any(|l| l.chars().count() > 80),
-            "{shape}: the hidden tail must hold a line the display would cut"
+            "{shape}: the hidden tail must hold a long line"
         );
         let shown: Vec<String> = raw_lines.iter().map(|l| shown_form(l)).collect();
 
