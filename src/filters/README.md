@@ -50,6 +50,7 @@ expected = "expected filtered output"
 |-------|------|-------------|
 | `description` | string | Human-readable description |
 | `match_command` | regex | Matches the command string (e.g. `"^docker\\s+inspect"`) |
+| `passthrough_max_bytes` | int | Output of at most N bytes is passed through whole, before any other stage |
 | `strip_ansi` | bool | Strip ANSI escape codes before processing |
 | `filter_stderr` | bool | Capture and merge stderr into stdout before filtering (use for tools like liquibase that emit banners to stderr) |
 | `strip_lines_matching` | regex[] | Drop lines matching any regex |

@@ -20,7 +20,8 @@ Core infrastructure shared by all RTK command modules. Every filter, tracker, an
 
 ## TOML Filter Pipeline
 
-The TOML DSL applies 8 stages in order:
+The TOML DSL applies 8 stages in order, after an optional stage 0: output of at most
+`passthrough_max_bytes` bytes is returned whole and no other stage runs.
 
 1. **strip_ansi**: Remove ANSI escape codes if enabled
 2. **replace**: Line-by-line regex substitutions (chainable, supports backreferences)
