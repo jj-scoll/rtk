@@ -43,10 +43,16 @@ fn fake_gh(dir: &Path, table: &str, code: i32) {
 }
 
 /// Rows as `gh` 2.46 prints them: tab-separated name, state, elapsed, url, description.
+// Passing rows past the first two are filler: every check is listed by name, and on a
+// four-row table gh's own output is the cheaper one, which RTK then prints instead.
 const RED_TABLE: &str = "doc review\tfail\t13s\thttps://example.test/job/1\t\n\
 fmt\tfail\t7s\thttps://example.test/job/2\t\n\
 Analyze (rust)\tpass\t4m17s\thttps://example.test/job/3\t\n\
-check\tpass\t5s\thttps://example.test/job/4\t\n";
+check\tpass\t5s\thttps://example.test/job/4\t\n\
+test (ubuntu-latest)\tpass\t3m11s\thttps://example.test/job/5\t\n\
+test (macos-latest)\tpass\t4m2s\thttps://example.test/job/6\t\n\
+clippy\tpass\t31s\thttps://example.test/job/7\t\n\
+govulncheck\tpass\t25s\thttps://example.test/job/8\t\n";
 
 #[test]
 fn failing_checks_are_summarised_not_dumped_raw() {
@@ -60,7 +66,7 @@ fn failing_checks_are_summarised_not_dumped_raw() {
         stdout.contains("CI Checks Summary:"),
         "filter must run on a non-zero exit, got:\n{stdout}"
     );
-    assert!(stdout.contains("Passed: 2"), "got:\n{stdout}");
+    assert!(stdout.contains("Passed: 6"), "got:\n{stdout}");
     assert!(stdout.contains("Failed: 2"), "got:\n{stdout}");
     assert!(
         stdout.contains("doc review") && stdout.contains("fmt"),
@@ -102,7 +108,11 @@ fn a_cancelled_run_does_not_read_as_nothing_wrong() {
         dir.path(),
         "build\tcancelled\t45s\thttps://example.test/job/1\t\n\
 test (ubuntu)\tcancelled\t44s\thttps://example.test/job/2\t\n\
-Security Scan\tskipping\t0\thttps://example.test/job/3\t\n",
+Security Scan\tskipping\t0\thttps://example.test/job/3\t\n\
+fmt\tpass\t7s\thttps://example.test/job/4\t\n\
+clippy\tpass\t31s\thttps://example.test/job/5\t\n\
+govulncheck\tpass\t25s\thttps://example.test/job/6\t\n\
+doc review\tpass\t13s\thttps://example.test/job/7\t\n",
         1,
     );
 

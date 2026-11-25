@@ -1,0 +1,202 @@
+[
+  {
+    "author": {
+      "login": "example"
+    },
+    "headRefName": "fix/guard-mutation-gaps",
+    "number": 85,
+    "state": "MERGED",
+    "title": "fix(guardrails): close gaps found by a 10,705-case mutation test",
+    "updatedAt": "2026-11-25T08:57:31Z"
+  },
+  {
+    "author": {
+      "login": "example"
+    },
+    "headRefName": "ci/changelog-fragments",
+    "number": 84,
+    "state": "MERGED",
+    "title": "ci: one changelog entry file per pull request instead of a shared Unreleased section",
+    "updatedAt": "2026-11-25T08:12:27Z"
+  },
+  {
+    "author": {
+      "login": "example"
+    },
+    "headRefName": "fix/memory-socket-and-formatters",
+    "number": 83,
+    "state": "MERGED",
+    "title": "memory: keep a live daemon's socket; fix get_tool_uses nested layout and trailing text",
+    "updatedAt": "2026-11-25T05:16:29Z"
+  },
+  {
+    "author": {
+      "login": "example"
+    },
+    "headRefName": "test/memdquery-hooklatency",
+    "number": 82,
+    "state": "MERGED",
+    "title": "test: cover memdquery timeline/search/formatter branches and hooklatency",
+    "updatedAt": "2026-11-25T05:04:00Z"
+  },
+  {
+    "author": {
+      "login": "example"
+    },
+    "headRefName": "refactor/shared-internal",
+    "number": 81,
+    "state": "MERGED",
+    "title": "refactor: share py.go and containerrun.go through internal packages",
+    "updatedAt": "2026-11-25T04:51:39Z"
+  },
+  {
+    "author": {
+      "login": "app/dependabot"
+    },
+    "headRefName": "dependabot/github_actions/github/codeql-action/upload-sarif-4.39.4",
+    "number": 80,
+    "state": "MERGED",
+    "title": "chore(deps): Bump github/codeql-action/upload-sarif from 4.39.3 to 4.39.4",
+    "updatedAt": "2026-11-25T02:52:45Z"
+  },
+  {
+    "author": {
+      "login": "app/dependabot"
+    },
+    "headRefName": "dependabot/github_actions/astral-sh/setup-uv-10.4.0",
+    "number": 79,
+    "state": "MERGED",
+    "title": "chore(deps): Bump astral-sh/setup-uv from 10.3.3 to 10.4.0",
+    "updatedAt": "2026-11-25T02:52:38Z"
+  },
+  {
+    "author": {
+      "login": "example"
+    },
+    "headRefName": "feat/writer-config-dir",
+    "number": 78,
+    "state": "MERGED",
+    "title": "guardrails: GUARDRAILS_WRITER_CONFIG_DIR picks the handoff writer's account",
+    "updatedAt": "2026-11-25T02:51:45Z"
+  },
+  {
+    "author": {
+      "login": "example"
+    },
+    "headRefName": "feat/ecs-event-export",
+    "number": 77,
+    "state": "MERGED",
+    "title": "guardrails: opt-in ECS JSON-lines export of guard decisions",
+    "updatedAt": "2026-11-25T02:41:29Z"
+  },
+  {
+    "author": {
+      "login": "example"
+    },
+    "headRefName": "ci/pin-actions",
+    "number": 76,
+    "state": "MERGED",
+    "title": "ci: pin actions to commit SHAs; Dependabot for github-actions",
+    "updatedAt": "2026-11-25T01:45:44Z"
+  },
+  {
+    "author": {
+      "login": "example"
+    },
+    "headRefName": "ci/changelog-unreleased",
+    "number": 75,
+    "state": "MERGED",
+    "title": "ci: keep the changelog current with an Unreleased section",
+    "updatedAt": "2026-11-25T01:07:20Z"
+  },
+  {
+    "author": {
+      "login": "example"
+    },
+    "headRefName": "docs/changelog-1.10.6-to-1.12.1",
+    "number": 74,
+    "state": "MERGED",
+    "title": "docs: changelog for 1.10.6 to 1.12.1",
+    "updatedAt": "2026-11-25T01:02:29Z"
+  },
+  {
+    "author": {
+      "login": "example"
+    },
+    "headRefName": "fix/resume-test-symlinked-tmp",
+    "number": 73,
+    "state": "MERGED",
+    "title": "test(memory): fix TestResumeCommandRunsInAShell on macOS (symlinked temp dir)",
+    "updatedAt": "2026-11-25T00:22:46Z"
+  },
+  {
+    "author": {
+      "login": "example"
+    },
+    "headRefName": "feat/threat-model",
+    "number": 72,
+    "state": "MERGED",
+    "title": "Threat model (OWASP LLM Top 10 / MITRE ATLAS), egress + fuzz hardening, release provenance",
+    "updatedAt": "2026-11-25T00:11:48Z"
+  },
+  {
+    "author": {
+      "login": "example"
+    },
+    "headRefName": "feat/memory-threads",
+    "number": 71,
+    "state": "MERGED",
+    "title": "feat(memory): Atuin-Threads-style raw search, capture rules, resume and import",
+    "updatedAt": "2026-11-11T19:17:36Z"
+  },
+  {
+    "author": {
+      "login": "example"
+    },
+    "headRefName": "refactor/vendor-gitleaks-rules",
+    "number": 70,
+    "state": "MERGED",
+    "title": "refactor(guardrails): evaluate gitleaks rules from vendored data",
+    "updatedAt": "2026-11-11T13:03:49Z"
+  },
+  {
+    "author": {
+      "login": "example"
+    },
+    "headRefName": "feat/review-batch-2026-11",
+    "number": 69,
+    "state": "MERGED",
+    "title": "feat: project secret defaults, gitleaks rules, daemon handover, remote-URL project keys, in-git checksums",
+    "updatedAt": "2026-11-11T09:44:25Z"
+  },
+  {
+    "author": {
+      "login": "example"
+    },
+    "headRefName": "ci/job-timeouts-rtk-pin",
+    "number": 68,
+    "state": "MERGED",
+    "title": "ci: time out hung matrix jobs; pin the rtk plugin to a commit",
+    "updatedAt": "2026-11-11T01:49:36Z"
+  },
+  {
+    "author": {
+      "login": "example"
+    },
+    "headRefName": "fix/redact-psql-html",
+    "number": 67,
+    "state": "MERGED",
+    "title": "fix(guardrails): force psql --html so each result is its own table (#66)",
+    "updatedAt": "2026-11-10T17:37:06Z"
+  },
+  {
+    "author": {
+      "login": "example"
+    },
+    "headRefName": "fix/redact-psql-multi-result",
+    "number": 65,
+    "state": "MERGED",
+    "title": "fix(guardrails): split psql --csv output into one table per result (#64)",
+    "updatedAt": "2026-11-10T16:01:01Z"
+  }
+]

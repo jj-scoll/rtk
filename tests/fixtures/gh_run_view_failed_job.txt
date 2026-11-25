@@ -1,0 +1,33 @@
+X feat/threat-model ci example/broodhall#72 · 45516177094
+Triggered via pull_request about 9 hours ago
+
+JOBS
+✓ govulncheck in 10s (ID 138884654928)
+✓ test (macos-latest) in 3m42s (ID 138884655232)
+X memory (macos-latest, osx_arm64) in 4m11s (ID 138884655238)
+  ✓ Set up job
+  ✓ Run actions/checkout@v7
+  ✓ Run actions/setup-go@v7
+  ✓ DuckDB extensions
+  ✓ Run go vet ./cmd/memory/...
+  X Run MEMORY_EXT_DIR="$RUNNER_TEMP/ext" go test ./cmd/memory/...
+  - Post Run actions/setup-go@v7
+  ✓ Post Run actions/checkout@v7
+  ✓ Complete job
+✓ memory (ubuntu-latest, linux_amd64) in 3m27s (ID 138884655266)
+✓ context-guard in 12s (ID 138884655379)
+✓ test (ubuntu-latest) in 3m7s (ID 138884655596)
+
+ANNOTATIONS
+- Due to capacity constraints, jobs targeting macOS arm64 runners may experience longer queue times.
+test (macos-latest): .github#1
+
+X Process completed with exit code 1.
+memory (macos-latest, osx_arm64): .github#55
+
+- Due to capacity constraints, jobs targeting macOS arm64 runners may experience longer queue times.
+memory (macos-latest, osx_arm64): .github#1
+
+
+To see what failed, try: gh run view 45516177094 --log-failed
+View this run on GitHub: https://github.com/example/broodhall/actions/runs/45516177094
