@@ -187,8 +187,17 @@ fn estimate_hook_coverage_with_verdict(
     verdict: PermissionVerdict,
     ctx: &CoverageContext,
 ) -> bool {
-    ctx.hook_installed
-        && !matches!(verdict, PermissionVerdict::Deny | PermissionVerdict::Defer)
+    ctx.hook_installed && hook_would_rewrite(permission_cmd, rewrite_cmd, verdict, ctx)
+}
+
+/// The hook's own decision order, minus the question of whether it is installed.
+fn hook_would_rewrite(
+    permission_cmd: &str,
+    rewrite_cmd: &str,
+    verdict: PermissionVerdict,
+    ctx: &CoverageContext,
+) -> bool {
+    !matches!(verdict, PermissionVerdict::Deny | PermissionVerdict::Defer)
         && !lexer::contains_unattestable_construct(permission_cmd)
         && registry::rewrite_command_precompiled(
             rewrite_cmd,
@@ -196,6 +205,24 @@ fn estimate_hook_coverage_with_verdict(
             &ctx.normalized_transparent_prefixes,
         )
         .is_some()
+}
+
+/// Whether an uncovered `Supported` segment of `raw_cmd` is a saving the user could
+/// actually get, i.e. today's hook would rewrite the full command line. Judged on
+/// the whole line, not the segment: `split_command_chain` keeps only a pipeline's
+/// producer, so `rg -n foo . | sort` reaches the caller as a bare `rg -n foo .`,
+/// while the hook refuses to rewrite a producer a parser consumes. Ignores
+/// `hook_installed` on purpose — installing the hook is how a user recovers a miss.
+/// Shares `hook_coverage`'s per-line (not per-segment) imprecision for chains.
+fn miss_is_recoverable(raw_cmd: &str, ctx: &CoverageContext) -> bool {
+    let verdict = permissions::check_command_with_rules_and_prefixes(
+        raw_cmd,
+        &ctx.rules.deny,
+        &ctx.rules.ask,
+        &ctx.rules.allow,
+        &ctx.normalized_transparent_prefixes,
+    );
+    hook_would_rewrite(raw_cmd, raw_cmd, verdict, ctx)
 }
 
 /// Would `raw_cmd` (still carrying its `RTK_DISABLED=` prefix) have been covered
@@ -437,6 +464,7 @@ pub fn run(
     let mut already_rtk: usize = 0;
     let mut already_rtk_estimated: usize = 0;
     let mut parse_errors: usize = 0;
+    let mut skipped_by_design: usize = 0;
     let mut rtk_disabled_count: usize = 0;
     let mut rtk_disabled_estimated: usize = 0;
     let mut rtk_disabled_cmds: HashMap<String, usize> = HashMap::new();
@@ -456,6 +484,8 @@ pub fn run(
         };
 
         for ext_cmd in &extracted {
+            // Per raw line, computed on first need (see `miss_is_recoverable`).
+            let mut recoverable: Option<bool> = None;
             let parts = split_command_chain(&ext_cmd.command);
             for part in parts {
                 total_commands += 1;
@@ -517,6 +547,13 @@ pub fn run(
                             if coverage.is_estimated() {
                                 already_rtk_estimated += 1;
                             }
+                            continue;
+                        }
+
+                        if !*recoverable.get_or_insert_with(|| {
+                            miss_is_recoverable(&ext_cmd.command, &coverage_ctx)
+                        }) {
+                            skipped_by_design += 1;
                             continue;
                         }
 
@@ -668,6 +705,7 @@ pub fn run(
         rtk_disabled_count,
         rtk_disabled_estimated,
         rtk_disabled_examples,
+        skipped_by_design,
         agent_status: report::AgentIntegrationStatus::detect(),
     };
 
@@ -733,6 +771,56 @@ mod tests {
             exclude_patterns: vec![],
             normalized_transparent_prefixes: vec![],
         }
+    }
+
+    // A deferred segment is only a *missed* saving if the hook could have rewritten
+    // it. `split_command_chain` keeps just the producer of a pipeline, so
+    // `rg -n foo . | sort` was scored as a bare `rg -n foo .` even though the hook
+    // refuses to rewrite a producer whose output a parser consumes.
+    #[test]
+    fn test_miss_is_recoverable_false_for_pipe_into_parser() {
+        let ctx = test_ctx(true);
+        for cmd in [
+            "rg -n foo . | sort",
+            "rg -n foo . | cut -c1-200 | head -40",
+            "grep -n foo bar.py | wc -l",
+            "cat a.rs | sed -n 1,60p",
+        ] {
+            assert!(!miss_is_recoverable(cmd, &ctx), "{cmd}");
+        }
+    }
+
+    #[test]
+    fn test_miss_is_recoverable_false_for_loop() {
+        let ctx = test_ctx(true);
+        let cmd = "for f in a b; do rg -n x \"$f\"; done";
+        assert!(!miss_is_recoverable(cmd, &ctx), "{cmd}");
+    }
+
+    #[test]
+    fn test_miss_is_recoverable_false_for_deny_rule() {
+        let mut ctx = test_ctx(true);
+        ctx.rules.deny = vec!["rg".to_string()];
+        assert!(!miss_is_recoverable("rg -n foo .", &ctx));
+    }
+
+    #[test]
+    fn test_miss_is_recoverable_true_for_rewritable_commands() {
+        let ctx = test_ctx(true);
+        for cmd in [
+            "rg -n foo .",
+            "rg -n foo . | head -5",
+            "cd /tmp && rg -n foo .",
+            "git status",
+        ] {
+            assert!(miss_is_recoverable(cmd, &ctx), "{cmd}");
+        }
+    }
+
+    #[test]
+    fn test_miss_is_recoverable_true_when_hook_not_installed() {
+        // Installing the hook is exactly how the user recovers this saving.
+        assert!(miss_is_recoverable("rg -n foo .", &test_ctx(false)));
     }
 
     #[test]
