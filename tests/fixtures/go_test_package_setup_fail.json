@@ -1,0 +1,4 @@
+{"Time":"2026-11-25T06:12:26.426115949-05:00","Action":"start","Package":"github.com/example/broodhall/cmd/memory"}
+{"Time":"2026-11-25T06:12:26.447104791-05:00","Action":"output","Package":"github.com/example/broodhall/cmd/memory","Output":"memory tests need the signed DuckDB extensions fts, httpfs and quack in /home/user/.local/share/memory/ext (set MEMORY_EXT_DIR): stat /home/user/.local/share/memory/ext/fts.duckdb_extension: no such file or directory\n"}
+{"Time":"2026-11-25T06:12:26.449564257-05:00","Action":"output","Package":"github.com/example/broodhall/cmd/memory","Output":"FAIL\tgithub.com/example/broodhall/cmd/memory\t0.023s\n","OutputType":"frame"}
+{"Time":"2026-11-25T06:12:26.44966579-05:00","Action":"fail","Package":"github.com/example/broodhall/cmd/memory","Elapsed":0.024}

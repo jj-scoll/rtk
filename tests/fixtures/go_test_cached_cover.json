@@ -1,0 +1,22 @@
+{"Time":"2026-11-25T06:11:17.662444528-05:00","Action":"start","Package":"github.com/example/broodhall/internal/container"}
+{"Time":"2026-11-25T06:11:17.662680979-05:00","Action":"run","Package":"github.com/example/broodhall/internal/container","Test":"TestSub"}
+{"Time":"2026-11-25T06:11:17.662739001-05:00","Action":"start","Package":"github.com/example/broodhall/internal/pytext"}
+{"Time":"2026-11-25T06:11:17.662765847-05:00","Action":"run","Package":"github.com/example/broodhall/internal/pytext","Test":"TestDecodeJSON"}
+{"Time":"2026-11-25T06:11:17.662887206-05:00","Action":"pass","Package":"github.com/example/broodhall/internal/pytext","Test":"TestDecodeJSON","Elapsed":0}
+{"Time":"2026-11-25T06:11:17.662894392-05:00","Action":"run","Package":"github.com/example/broodhall/internal/pytext","Test":"TestObjKeyOrderAndDuplicates"}
+{"Time":"2026-11-25T06:11:17.662901054-05:00","Action":"pass","Package":"github.com/example/broodhall/internal/pytext","Test":"TestObjKeyOrderAndDuplicates","Elapsed":0}
+{"Time":"2026-11-25T06:11:17.662905367-05:00","Action":"run","Package":"github.com/example/broodhall/internal/pytext","Test":"TestObjAccessors"}
+{"Time":"2026-11-25T06:11:17.662912519-05:00","Action":"pass","Package":"github.com/example/broodhall/internal/pytext","Test":"TestObjAccessors","Elapsed":0}
+{"Time":"2026-11-25T06:11:17.662973153-05:00","Action":"pass","Package":"github.com/example/broodhall/internal/container","Test":"TestSub","Elapsed":0}
+{"Time":"2026-11-25T06:11:17.662975796-05:00","Action":"run","Package":"github.com/example/broodhall/internal/container","Test":"TestCmd"}
+{"Time":"2026-11-25T06:11:17.663386567-05:00","Action":"pass","Package":"github.com/example/broodhall/internal/container","Test":"TestCmd","Elapsed":0}
+{"Time":"2026-11-25T06:11:17.663389142-05:00","Action":"run","Package":"github.com/example/broodhall/internal/container","Test":"TestWithin"}
+{"Time":"2026-11-25T06:11:17.663400685-05:00","Action":"pass","Package":"github.com/example/broodhall/internal/container","Test":"TestWithin","Elapsed":0}
+{"Time":"2026-11-25T06:11:17.663578009-05:00","Action":"output","Package":"github.com/example/broodhall/internal/container","Output":"PASS\n","OutputType":"frame"}
+{"Time":"2026-11-25T06:11:17.663581938-05:00","Action":"output","Package":"github.com/example/broodhall/internal/container","Output":"coverage: 98.9% of statements\n"}
+{"Time":"2026-11-25T06:11:17.663585997-05:00","Action":"output","Package":"github.com/example/broodhall/internal/container","Output":"ok  \tgithub.com/example/broodhall/internal/container\t(cached)\tcoverage: 98.9% of statements\n"}
+{"Time":"2026-11-25T06:11:17.663592812-05:00","Action":"pass","Package":"github.com/example/broodhall/internal/container","Elapsed":0.001}
+{"Time":"2026-11-25T06:11:17.66457528-05:00","Action":"output","Package":"github.com/example/broodhall/internal/pytext","Output":"PASS\n","OutputType":"frame"}
+{"Time":"2026-11-25T06:11:17.66457727-05:00","Action":"output","Package":"github.com/example/broodhall/internal/pytext","Output":"coverage: 98.8% of statements\n"}
+{"Time":"2026-11-25T06:11:17.664579191-05:00","Action":"output","Package":"github.com/example/broodhall/internal/pytext","Output":"ok  \tgithub.com/example/broodhall/internal/pytext\t(cached)\tcoverage: 98.8% of statements\n"}
+{"Time":"2026-11-25T06:11:17.664587621-05:00","Action":"pass","Package":"github.com/example/broodhall/internal/pytext","Elapsed":0.002}
